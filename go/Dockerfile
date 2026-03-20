@@ -1,12 +1,10 @@
-FROM debian:bookworm-slim
+# syntax=docker/dockerfile:1.7
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+FROM gcr.io/distroless/static-debian12
 
 WORKDIR /app
 
-COPY dist/hazuki-go /app/hazuki-go
-RUN chmod +x /app/hazuki-go
+COPY --chmod=755 dist/hazuki-go /app/hazuki-go
 
 ENV HAZUKI_DB_PATH=/data/hazuki.db
 

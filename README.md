@@ -26,6 +26,7 @@ docker compose up -d
 
 默认会拉取 `ghcr.io/xmzo/hazuki-go:latest`。该镜像由 GitHub Actions 在 `main` 分支推送后自动编译并发布，当前同时提供 `linux/amd64` 和 `linux/arm64`。
 如果你的 GHCR 包还是私有状态，需要先执行 `docker login ghcr.io`，或把该包改成 public 再让服务器匿名拉取。
+运行时镜像使用更小的 distroless 底座，因此容器里默认没有 `bash` / `sh`。
 
 启动后打开：
 
