@@ -8,15 +8,40 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"runtime/debug"
+	"runtime/metrics"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"hazuki-go/internal/model"
 	"hazuki-go/internal/proxy/upstreamhttp"
 )
 
-const streamRewriteChunkBytes = 128 << 10 // 128 KiB
+const (
+	defaultBufferedRewriteBytes       = 1 << 20   // 1 MiB
+	minBufferedRewriteBytes           = 128 << 10 // 128 KiB
+	maxBufferedRewriteBytes           = 4 << 20   // 4 MiB
+	minStreamRewriteChunkBytes        = 32 << 10  // 32 KiB
+	maxStreamRewriteChunkBytes        = 128 << 10 // 128 KiB
+	minRewriteReserveBytes            = 32 << 20  // 32 MiB
+	maxRewriteReserveBytes            = 128 << 20 // 128 MiB
+	rewriteHeadroomDivisor      int64 = 32
+	maxReasonableMemoryBytes    int64 = 1 << 60
+	maxInt64                    int64 = int64(^uint64(0) >> 1)
+)
+
+var (
+	goMemorySamples = []metrics.Sample{
+		{Name: "/memory/classes/total:bytes"},
+		{Name: "/memory/classes/heap/released:bytes"},
+	}
+	detectedStaticMemoryBudgetBytes = sync.OnceValue(detectStaticMemoryBudgetBytes)
+	htmlRewritePlanner              = chooseHTMLRewritePlan
+)
 
 type CorsOrigins struct {
 	Kind      string
@@ -48,6 +73,12 @@ type RuntimeConfig struct {
 
 	Host string
 	Port int
+}
+
+type htmlRewritePlan struct {
+	Buffered         bool
+	BufferedLimit    int64
+	StreamChunkBytes int
 }
 
 func BuildRuntimeConfig(cfg model.AppConfig) (RuntimeConfig, error) {
@@ -278,9 +309,11 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 		}
 	}
 
-	// HTML responses are rewritten in a streaming fashion so large pages keep
-	// domain replacement without forcing the whole body into memory.
+	// HTML rewrite mode is chosen from current memory headroom so small hosts can
+	// automatically stream under pressure while larger/idle hosts keep the
+	// cheaper buffered path.
 	shouldRewrite := shouldRewriteHTML(effectiveContentType)
+	rewritePlan := htmlRewritePlanner(resp.ContentLength)
 
 	cacheControl := computeCacheControl(runtime.DisableCache, effectiveContentType, runtime.CacheControl, runtime.CacheControlMedia, runtime.CacheControlText)
 
@@ -298,7 +331,16 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 	}
 
 	if shouldRewrite {
-		_ = streamApplyReplacements(w, resp.Body, upstreamDomain, originalHost, runtime.ReplaceDict)
+		if rewritePlan.Buffered {
+			raw, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return
+			}
+			rewritten := applyReplacements(string(raw), upstreamDomain, originalHost, runtime.ReplaceDict)
+			_, _ = io.WriteString(w, rewritten)
+			return
+		}
+		_ = streamApplyReplacementsWithChunkSize(w, resp.Body, upstreamDomain, originalHost, runtime.ReplaceDict, rewritePlan.StreamChunkBytes)
 		return
 	}
 
@@ -600,6 +642,150 @@ func shouldRewriteHTML(contentType string) bool {
 	return strings.Contains(ct, "text/html") && strings.Contains(ct, "utf-8")
 }
 
+func chooseHTMLRewritePlan(contentLength int64) htmlRewritePlan {
+	return deriveHTMLRewritePlan(currentMemoryBudgetBytes(), currentGoMemoryUsedBytes(), contentLength)
+}
+
+func deriveHTMLRewritePlan(memoryBudgetBytes, memoryUsedBytes, contentLength int64) htmlRewritePlan {
+	plan := htmlRewritePlan{
+		BufferedLimit:    defaultBufferedRewriteBytes,
+		StreamChunkBytes: maxStreamRewriteChunkBytes,
+	}
+
+	if memoryBudgetBytes > 0 && memoryUsedBytes >= 0 && memoryBudgetBytes > memoryUsedBytes {
+		headroom := memoryBudgetBytes - memoryUsedBytes - computeRewriteReserveBytes(memoryBudgetBytes)
+		if headroom <= 0 {
+			plan.BufferedLimit = 0
+			plan.StreamChunkBytes = minStreamRewriteChunkBytes
+		} else {
+			plan.BufferedLimit = clampInt64(headroom/rewriteHeadroomDivisor, minBufferedRewriteBytes, maxBufferedRewriteBytes)
+			plan.StreamChunkBytes = clampInt(int(plan.BufferedLimit/8), minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes)
+		}
+	}
+
+	plan.Buffered = contentLength >= 0 && plan.BufferedLimit > 0 && contentLength <= plan.BufferedLimit
+	return plan
+}
+
+func computeRewriteReserveBytes(memoryBudgetBytes int64) int64 {
+	reserve := memoryBudgetBytes / 8
+	if reserve < minRewriteReserveBytes {
+		return minRewriteReserveBytes
+	}
+	if reserve > maxRewriteReserveBytes {
+		return maxRewriteReserveBytes
+	}
+	return reserve
+}
+
+func currentMemoryBudgetBytes() int64 {
+	if limit := debug.SetMemoryLimit(-1); isUsableMemoryBudget(limit) {
+		return limit
+	}
+	if limit := detectedStaticMemoryBudgetBytes(); isUsableMemoryBudget(limit) {
+		return limit
+	}
+	if available := readMemAvailableBytes("/proc/meminfo"); isUsableMemoryBudget(available) {
+		return available
+	}
+	return 0
+}
+
+func detectStaticMemoryBudgetBytes() int64 {
+	for _, path := range []string{
+		"/sys/fs/cgroup/memory.max",
+		"/sys/fs/cgroup/memory/memory.limit_in_bytes",
+	} {
+		if limit := readCgroupMemoryLimitBytes(path); isUsableMemoryBudget(limit) {
+			return limit
+		}
+	}
+	return 0
+}
+
+func currentGoMemoryUsedBytes() int64 {
+	samples := make([]metrics.Sample, len(goMemorySamples))
+	copy(samples, goMemorySamples)
+	metrics.Read(samples)
+	if len(samples) != 2 {
+		return 0
+	}
+	if samples[0].Value.Kind() != metrics.KindUint64 || samples[1].Value.Kind() != metrics.KindUint64 {
+		return 0
+	}
+	total := samples[0].Value.Uint64()
+	released := samples[1].Value.Uint64()
+	if total < released || total > uint64(maxInt64) {
+		return 0
+	}
+	return int64(total - released)
+}
+
+func readCgroupMemoryLimitBytes(path string) int64 {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	value := strings.TrimSpace(string(raw))
+	if value == "" || strings.EqualFold(value, "max") {
+		return 0
+	}
+	limit, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return limit
+}
+
+func readMemAvailableBytes(path string) int64 {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(line, "MemAvailable:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return 0
+		}
+		value, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return 0
+		}
+		if value > maxInt64/1024 {
+			return 0
+		}
+		return value * 1024
+	}
+	return 0
+}
+
+func isUsableMemoryBudget(value int64) bool {
+	return value > 0 && value < maxInt64 && value < maxReasonableMemoryBytes
+}
+
+func clampInt64(value, minValue, maxValue int64) int64 {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
 func computeCacheControl(disableCache bool, contentType, cacheControl, cacheControlMedia, cacheControlText string) string {
 	if disableCache {
 		return "no-store"
@@ -730,6 +916,9 @@ func removeVaryHeaderValue(vary, toRemove string) string {
 }
 
 func applyReplacements(text, upstreamDomain, hostName string, replaceDict map[string]string) string {
+	if pair, ok := resolveSingleReplacement(replaceDict, upstreamDomain, hostName); ok {
+		return strings.ReplaceAll(text, pair.Old, pair.New)
+	}
 	out := text
 	for _, pair := range buildReplacementPairs(upstreamDomain, hostName, replaceDict) {
 		out = strings.ReplaceAll(out, pair.Old, pair.New)
@@ -749,6 +938,13 @@ type streamReplacement struct {
 }
 
 func buildReplacementPairs(upstreamDomain, hostName string, replaceDict map[string]string) []replacementPair {
+	if len(replaceDict) == 0 {
+		return nil
+	}
+	if pair, ok := resolveSingleReplacement(replaceDict, upstreamDomain, hostName); ok {
+		return []replacementPair{pair}
+	}
+
 	keys := make([]string, 0, len(replaceDict))
 	for k := range replaceDict {
 		keys = append(keys, k)
@@ -769,6 +965,24 @@ func buildReplacementPairs(upstreamDomain, hostName string, replaceDict map[stri
 		pairs = append(pairs, replacementPair{Old: resolvedKey, New: resolvedValue})
 	}
 	return pairs
+}
+
+func resolveSingleReplacement(replaceDict map[string]string, upstreamDomain, hostName string) (replacementPair, bool) {
+	if len(replaceDict) != 1 {
+		return replacementPair{}, false
+	}
+	for key, rawValue := range replaceDict {
+		resolvedKey := resolveReplacementToken(key, upstreamDomain, hostName)
+		if strings.TrimSpace(resolvedKey) == "" {
+			return replacementPair{}, false
+		}
+		resolvedValue := resolveReplacementToken(rawValue, upstreamDomain, hostName)
+		if resolvedKey == resolvedValue {
+			return replacementPair{}, false
+		}
+		return replacementPair{Old: resolvedKey, New: resolvedValue}, true
+	}
+	return replacementPair{}, false
 }
 
 func resolveReplacementToken(token, upstreamDomain, hostName string) string {
@@ -840,6 +1054,14 @@ func (sr *streamReplacement) pendingPrefixLen(data []byte) int {
 }
 
 func streamApplyReplacements(dst io.Writer, src io.Reader, upstreamDomain, hostName string, replaceDict map[string]string) error {
+	return streamApplyReplacementsWithChunkSize(dst, src, upstreamDomain, hostName, replaceDict, maxStreamRewriteChunkBytes)
+}
+
+func streamApplyReplacementsWithChunkSize(dst io.Writer, src io.Reader, upstreamDomain, hostName string, replaceDict map[string]string, chunkSize int) error {
+	if pair, ok := resolveSingleReplacement(replaceDict, upstreamDomain, hostName); ok {
+		return streamApplySingleReplacementWithChunkSize(dst, src, pair, chunkSize)
+	}
+
 	pairs := buildReplacementPairs(upstreamDomain, hostName, replaceDict)
 	if len(pairs) == 0 {
 		_, err := io.Copy(dst, src)
@@ -858,7 +1080,7 @@ func streamApplyReplacements(dst io.Writer, src io.Reader, upstreamDomain, hostN
 		return err
 	}
 
-	buf := make([]byte, streamRewriteChunkBytes)
+	buf := make([]byte, clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes))
 	for {
 		n, err := src.Read(buf)
 		if n > 0 {
@@ -878,9 +1100,39 @@ func streamApplyReplacements(dst io.Writer, src io.Reader, upstreamDomain, hostN
 				out = streamer.transform(out, true)
 			}
 			if len(out) > 0 {
-				_, err = dst.Write(out)
+				if _, writeErr := dst.Write(out); writeErr != nil {
+					return writeErr
+				}
 			}
+			return nil
+		}
+		if err != nil {
 			return err
+		}
+	}
+}
+
+func streamApplySingleReplacementWithChunkSize(dst io.Writer, src io.Reader, pair replacementPair, chunkSize int) error {
+	streamer := newStreamReplacement(pair.Old, pair.New)
+	buf := make([]byte, clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes))
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			out := streamer.transform(buf[:n], false)
+			if len(out) > 0 {
+				if _, writeErr := dst.Write(out); writeErr != nil {
+					return writeErr
+				}
+			}
+		}
+		if err == io.EOF {
+			out := streamer.transform(nil, true)
+			if len(out) > 0 {
+				if _, writeErr := dst.Write(out); writeErr != nil {
+					return writeErr
+				}
+			}
+			return nil
 		}
 		if err != nil {
 			return err

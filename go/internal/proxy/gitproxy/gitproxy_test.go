@@ -11,7 +11,24 @@ import (
 	"testing"
 )
 
+func withHTMLRewritePlanner(t *testing.T, planner func(contentLength int64) htmlRewritePlan) {
+	t.Helper()
+	prev := htmlRewritePlanner
+	htmlRewritePlanner = planner
+	t.Cleanup(func() {
+		htmlRewritePlanner = prev
+	})
+}
+
 func TestHandlerRewritesSmallHTML(t *testing.T) {
+	withHTMLRewritePlanner(t, func(contentLength int64) htmlRewritePlan {
+		return htmlRewritePlan{
+			Buffered:         true,
+			BufferedLimit:    defaultBufferedRewriteBytes,
+			StreamChunkBytes: maxStreamRewriteChunkBytes,
+		}
+	})
+
 	var upstreamHost string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := `<a href="https://` + upstreamHost + `/repo">repo</a>`
@@ -55,6 +72,14 @@ func TestHandlerRewritesSmallHTML(t *testing.T) {
 }
 
 func TestHandlerRewritesLargeHTMLStreaming(t *testing.T) {
+	withHTMLRewritePlanner(t, func(contentLength int64) htmlRewritePlan {
+		return htmlRewritePlan{
+			Buffered:         false,
+			BufferedLimit:    minBufferedRewriteBytes,
+			StreamChunkBytes: minStreamRewriteChunkBytes,
+		}
+	})
+
 	var upstreamHost string
 	largeBody := ""
 
@@ -102,6 +127,48 @@ func TestHandlerRewritesLargeHTMLStreaming(t *testing.T) {
 	}
 }
 
+func TestDeriveHTMLRewritePlanBuffersWhenHeadroomIsHigh(t *testing.T) {
+	plan := deriveHTMLRewritePlan(256<<20, 96<<20, 2<<20)
+
+	if !plan.Buffered {
+		t.Fatal("expected 2MiB body to use buffered rewrite with ample headroom")
+	}
+	if plan.BufferedLimit != maxBufferedRewriteBytes {
+		t.Fatalf("buffered limit = %d, want %d", plan.BufferedLimit, maxBufferedRewriteBytes)
+	}
+	if plan.StreamChunkBytes != maxStreamRewriteChunkBytes {
+		t.Fatalf("stream chunk = %d, want %d", plan.StreamChunkBytes, maxStreamRewriteChunkBytes)
+	}
+}
+
+func TestDeriveHTMLRewritePlanStreamsWhenHeadroomIsLow(t *testing.T) {
+	plan := deriveHTMLRewritePlan(256<<20, 220<<20, 512<<10)
+
+	if plan.Buffered {
+		t.Fatal("expected low-headroom plan to stream")
+	}
+	if plan.BufferedLimit != minBufferedRewriteBytes {
+		t.Fatalf("buffered limit = %d, want %d", plan.BufferedLimit, minBufferedRewriteBytes)
+	}
+	if plan.StreamChunkBytes != minStreamRewriteChunkBytes {
+		t.Fatalf("stream chunk = %d, want %d", plan.StreamChunkBytes, minStreamRewriteChunkBytes)
+	}
+}
+
+func TestDeriveHTMLRewritePlanFallsBackToDefaultsWithoutBudget(t *testing.T) {
+	plan := deriveHTMLRewritePlan(0, 0, 768<<10)
+
+	if !plan.Buffered {
+		t.Fatal("expected default plan to buffer moderate HTML when no budget is available")
+	}
+	if plan.BufferedLimit != defaultBufferedRewriteBytes {
+		t.Fatalf("buffered limit = %d, want %d", plan.BufferedLimit, defaultBufferedRewriteBytes)
+	}
+	if plan.StreamChunkBytes != maxStreamRewriteChunkBytes {
+		t.Fatalf("stream chunk = %d, want %d", plan.StreamChunkBytes, maxStreamRewriteChunkBytes)
+	}
+}
+
 func TestStreamApplyReplacementsHandlesChunkBoundary(t *testing.T) {
 	src := &chunkedReader{
 		chunks: [][]byte{
@@ -124,6 +191,15 @@ func TestStreamApplyReplacementsHandlesChunkBoundary(t *testing.T) {
 	}
 	if strings.Contains(got, "raw.githubusercontent.com") {
 		t.Fatalf("expected upstream host to be removed, got %q", got)
+	}
+}
+
+func TestStreamApplyReplacementsReturnsNilOnEOF(t *testing.T) {
+	err := streamApplyReplacementsWithChunkSize(io.Discard, strings.NewReader("hello"), "raw.githubusercontent.com", "proxy.local", map[string]string{
+		"$upstream": "$custom_domain",
+	}, minStreamRewriteChunkBytes)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
 	}
 }
 
