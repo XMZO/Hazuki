@@ -25,6 +25,7 @@ const RedisMarkerKey = "hazuki:meta:app"
 const RedisMarkerValue = "hazuki-go"
 const RedisPrefix = "hazuki:cdnjs:"
 const RedisIndexKey = RedisPrefix + "index"
+const maxBufferedResponseBytes = 4 << 20 // 4 MiB
 
 func cacheID(key string) string {
 	sum := sha256.Sum256([]byte(key))
@@ -34,6 +35,13 @@ func cacheID(key string) string {
 func cacheBodyKey(id string) string { return RedisPrefix + "body:" + id }
 func cacheTypeKey(id string) string { return RedisPrefix + "type:" + id }
 func cacheMetaKey(id string) string { return RedisPrefix + "meta:" + id }
+
+var errResponseTooLarge = errors.New("cdnjs response too large to buffer")
+
+type cachedBody struct {
+	Body []byte
+	Type string
+}
 
 type RuntimeConfig struct {
 	Host string
@@ -412,44 +420,28 @@ func extractExtension(requestPath string) string {
 func fetchWithCache(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig, redisClient *redis.Client, client *http.Client, sf *singleflight.Group, cdnURL, reqPath string) {
 	ttlSeconds := getCacheTTLSeconds(reqPath, runtime.CacheTTLSeconds, runtime.DefaultTTLSeconds)
 
-	var cached []byte
-	var cachedType string
 	cacheKeyID := cacheID(cdnURL)
 	bodyKey := cacheBodyKey(cacheKeyID)
 	typeKey := cacheTypeKey(cacheKeyID)
 	if redisClient != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 250*time.Millisecond)
-		pipe := redisClient.Pipeline()
-		bodyCmd := pipe.Get(ctx, bodyKey)
-		typeCmd := pipe.Get(ctx, typeKey)
-		_, _ = pipe.Exec(ctx)
-		cached, _ = bodyCmd.Bytes()
-		cachedType, _ = typeCmd.Result()
+		cached, ok := loadCachedBody(ctx, redisClient, bodyKey, typeKey)
 		cancel()
-	}
-
-	if cached != nil && strings.TrimSpace(cachedType) != "" {
-		writeBody(w, r, cached, cachedType, ttlSeconds, "HIT")
-		return
+		if ok {
+			writeBody(w, r, cached.Body, cached.Type, ttlSeconds, "HIT")
+			return
+		}
 	}
 
 	if sf != nil && redisClient != nil {
 		ch := sf.DoChan(cdnURL, func() (any, error) {
 			// Double-check cache in case another goroutine/process filled it.
 			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-			pipe := redisClient.Pipeline()
-			bodyCmd := pipe.Get(ctx, bodyKey)
-			typeCmd := pipe.Get(ctx, typeKey)
-			_, _ = pipe.Exec(ctx)
-			body, _ := bodyCmd.Bytes()
-			typ, _ := typeCmd.Result()
+			cached, ok := loadCachedBody(ctx, redisClient, bodyKey, typeKey)
 			cancel()
 
-			if body != nil && strings.TrimSpace(typ) != "" {
-				return struct {
-					Body []byte
-					Type string
-				}{Body: body, Type: typ}, nil
+			if ok {
+				return cached, nil
 			}
 
 			// Fetch and cache (leader only).
@@ -473,40 +465,12 @@ func fetchWithCache(w http.ResponseWriter, r *http.Request, runtime RuntimeConfi
 				return nil, errors.New("upstream non-2xx")
 			}
 
-			respBody, err := io.ReadAll(resp.Body)
+			buffered, err := readBufferedResponse(resp)
 			if err != nil {
 				return nil, err
 			}
-
-			contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
-			if contentType == "" {
-				contentType = "application/octet-stream"
-			}
-
-			ctx3, cancel3 := context.WithTimeout(context.Background(), 750*time.Millisecond)
-			ttl := time.Duration(ttlSeconds) * time.Second
-			nowUnix := time.Now().UTC().Unix()
-			pipe2 := redisClient.Pipeline()
-			metaKey := cacheMetaKey(cacheKeyID)
-			pipe2.SetNX(ctx3, RedisMarkerKey, RedisMarkerValue, 0)
-			pipe2.SetEx(ctx3, bodyKey, respBody, ttl)
-			pipe2.SetEx(ctx3, typeKey, contentType, ttl)
-			pipe2.HSet(ctx3, metaKey,
-				"url", cdnURL,
-				"type", contentType,
-				"size", len(respBody),
-				"updatedAt", nowUnix,
-			)
-			pipe2.Expire(ctx3, metaKey, ttl)
-			pipe2.ZAdd(ctx3, RedisIndexKey, redis.Z{Score: float64(nowUnix), Member: cacheKeyID})
-			pipe2.ZRemRangeByRank(ctx3, RedisIndexKey, 0, -5001)
-			_, _ = pipe2.Exec(ctx3)
-			cancel3()
-
-			return struct {
-				Body []byte
-				Type string
-			}{Body: respBody, Type: contentType}, nil
+			cacheBufferedResponse(redisClient, cacheKeyID, cdnURL, ttlSeconds, buffered)
+			return buffered, nil
 		})
 
 		select {
@@ -514,10 +478,7 @@ func fetchWithCache(w http.ResponseWriter, r *http.Request, runtime RuntimeConfi
 			return
 		case res := <-ch:
 			if res.Err == nil {
-				data := res.Val.(struct {
-					Body []byte
-					Type string
-				})
+				data := res.Val.(cachedBody)
 				cacheStatus := "MISS"
 				if res.Shared {
 					cacheStatus = "HIT"
@@ -567,45 +528,108 @@ func fetchWithCache(w http.ResponseWriter, r *http.Request, runtime RuntimeConfi
 		return
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusBadGateway)
-		if r.Method == http.MethodHead {
-			return
-		}
-		_, _ = w.Write([]byte("Fetch error: " + err.Error()))
-		return
-	}
-
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 
 	if redisClient != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
-		ttl := time.Duration(ttlSeconds) * time.Second
-		nowUnix := time.Now().UTC().Unix()
-		pipe := redisClient.Pipeline()
-		metaKey := cacheMetaKey(cacheKeyID)
-		pipe.SetNX(ctx, RedisMarkerKey, RedisMarkerValue, 0)
-		pipe.SetEx(ctx, bodyKey, body, ttl)
-		pipe.SetEx(ctx, typeKey, contentType, ttl)
-		pipe.HSet(ctx, metaKey,
-			"url", cdnURL,
-			"type", contentType,
-			"size", len(body),
-			"updatedAt", nowUnix,
-		)
-		pipe.Expire(ctx, metaKey, ttl)
-		pipe.ZAdd(ctx, RedisIndexKey, redis.Z{Score: float64(nowUnix), Member: cacheKeyID})
-		pipe.ZRemRangeByRank(ctx, RedisIndexKey, 0, -5001)
-		_, _ = pipe.Exec(ctx)
-		cancel()
+		buffered, err := readBufferedResponse(resp)
+		if err == nil {
+			cacheBufferedResponse(redisClient, cacheKeyID, cdnURL, ttlSeconds, buffered)
+			writeBody(w, r, buffered.Body, buffered.Type, ttlSeconds, "MISS")
+			return
+		}
+		if !errors.Is(err, errResponseTooLarge) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusBadGateway)
+			if r.Method == http.MethodHead {
+				return
+			}
+			_, _ = w.Write([]byte("Fetch error: " + err.Error()))
+			return
+		}
+		writeStreamingBody(w, r, resp, contentType, ttlSeconds, "BYPASS")
+		return
 	}
 
-	writeBody(w, r, body, contentType, ttlSeconds, "MISS")
+	writeStreamingBody(w, r, resp, contentType, ttlSeconds, "MISS")
+}
+
+func readBufferedResponse(resp *http.Response) (cachedBody, error) {
+	if resp == nil || resp.Body == nil {
+		return cachedBody{}, errors.New("nil response body")
+	}
+	if resp.ContentLength < 0 || resp.ContentLength > maxBufferedResponseBytes {
+		return cachedBody{}, errResponseTooLarge
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return cachedBody{}, err
+	}
+	if len(body) > maxBufferedResponseBytes {
+		return cachedBody{}, errResponseTooLarge
+	}
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return cachedBody{Body: body, Type: contentType}, nil
+}
+
+func cacheBufferedResponse(redisClient *redis.Client, cacheKeyID, cdnURL string, ttlSeconds int, data cachedBody) {
+	if redisClient == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+	ttl := time.Duration(ttlSeconds) * time.Second
+	nowUnix := time.Now().UTC().Unix()
+	pipe := redisClient.Pipeline()
+	metaKey := cacheMetaKey(cacheKeyID)
+	pipe.SetNX(ctx, RedisMarkerKey, RedisMarkerValue, 0)
+	pipe.SetEx(ctx, cacheBodyKey(cacheKeyID), data.Body, ttl)
+	pipe.SetEx(ctx, cacheTypeKey(cacheKeyID), data.Type, ttl)
+	pipe.HSet(ctx, metaKey,
+		"url", cdnURL,
+		"type", data.Type,
+		"size", len(data.Body),
+		"updatedAt", nowUnix,
+	)
+	pipe.Expire(ctx, metaKey, ttl)
+	pipe.ZAdd(ctx, RedisIndexKey, redis.Z{Score: float64(nowUnix), Member: cacheKeyID})
+	pipe.ZRemRangeByRank(ctx, RedisIndexKey, 0, -5001)
+	_, _ = pipe.Exec(ctx)
+}
+
+func loadCachedBody(ctx context.Context, redisClient *redis.Client, bodyKey, typeKey string) (cachedBody, bool) {
+	if redisClient == nil {
+		return cachedBody{}, false
+	}
+	pipe := redisClient.Pipeline()
+	bodyCmd := pipe.Get(ctx, bodyKey)
+	typeCmd := pipe.Get(ctx, typeKey)
+	_, _ = pipe.Exec(ctx)
+	body, _ := bodyCmd.Bytes()
+	typ, _ := typeCmd.Result()
+	if body == nil || strings.TrimSpace(typ) == "" {
+		return cachedBody{}, false
+	}
+	return cachedBody{Body: body, Type: typ}, true
+}
+
+func writeStreamingBody(w http.ResponseWriter, r *http.Request, resp *http.Response, contentType string, ttlSeconds int, cacheStatus string) {
+	w.Header().Set("X-Proxy-Cache", cacheStatus)
+	w.Header().Set("Cache-Control", "public, max-age="+strconvItoa(ttlSeconds))
+	w.Header().Set("Content-Type", contentType)
+	if cl := strings.TrimSpace(resp.Header.Get("Content-Length")); cl != "" {
+		w.Header().Set("Content-Length", cl)
+	}
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = io.Copy(w, resp.Body)
 }
 
 func writeBody(w http.ResponseWriter, r *http.Request, body []byte, contentType string, ttlSeconds int, cacheStatus string) {

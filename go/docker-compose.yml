@@ -5,7 +5,14 @@ services:
     restart: unless-stopped
     volumes:
       - hazuki-go-redis-data:/data
-    command: redis-server --appendonly yes
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${HAZUKI_REDIS_MAXMEMORY:-96mb}
+      - --maxmemory-policy
+      - ${HAZUKI_REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -30,6 +37,9 @@ services:
       # - "3004:3004" # git instance: gitInstances[0].port = 3004
     environment:
       - HAZUKI_DB_PATH=/data/hazuki.db
+      # Soft memory target for Go runtime on small hosts.
+      - GOMEMLIMIT=${HAZUKI_GOMEMLIMIT:-256MiB}
+      - GOGC=${HAZUKI_GOGC:-80}
       # Override local default (go/.env.example uses 127.0.0.1)
       - REDIS_HOST=redis
       - REDIS_PORT=6379

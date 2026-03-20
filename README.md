@@ -68,6 +68,7 @@ docker compose up -d
 - `HAZUKI_MASTER_KEY` 用于敏感字段加密存储。已存在 `enc:v1:...` 数据时，启动必须提供同一个 key；轮换请在 `/system` 执行，以确保数据库内容重加密并同步更新环境变量。
 - Redis：Docker Compose 默认包含 Redis；如果你不用 Docker，请自行部署 Redis 并设置 `REDIS_HOST`/`REDIS_PORT`（也可在面板里改）。
 - 如果你部署的是自己的 fork，可在 `go/.env` 里设置 `HAZUKI_IMAGE=ghcr.io/<your-owner>/hazuki-go:latest`，让 compose 拉取你自己的 GHCR 镜像。
+- 默认的 `go/.env.example` 已包含一套适合 `512MB` 小主机的较平衡内存参数：`GOMEMLIMIT=256MiB`、`GOGC=80`、`HAZUKI_REDIS_MAXMEMORY=96mb`、`HAZUKI_REDIS_MAXMEMORY_POLICY=allkeys-lru`。这会限制 Go/Redis 的内存增长；Redis 满了只会淘汰旧缓存，不会影响核心功能。
 
 ## 备份（导出/导入）
 

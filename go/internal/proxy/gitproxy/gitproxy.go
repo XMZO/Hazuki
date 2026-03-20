@@ -16,6 +16,8 @@ import (
 	"hazuki-go/internal/proxy/upstreamhttp"
 )
 
+const streamRewriteChunkBytes = 128 << 10 // 128 KiB
+
 type CorsOrigins struct {
 	Kind      string
 	AllowList map[string]struct{}
@@ -276,6 +278,8 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 		}
 	}
 
+	// HTML responses are rewritten in a streaming fashion so large pages keep
+	// domain replacement without forcing the whole body into memory.
 	shouldRewrite := shouldRewriteHTML(effectiveContentType)
 
 	cacheControl := computeCacheControl(runtime.DisableCache, effectiveContentType, runtime.CacheControl, runtime.CacheControlMedia, runtime.CacheControlText)
@@ -294,12 +298,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 	}
 
 	if shouldRewrite {
-		raw, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return
-		}
-		rewritten := applyReplacements(string(raw), upstreamDomain, originalHost, runtime.ReplaceDict)
-		_, _ = io.Copy(w, bytes.NewBufferString(rewritten))
+		_ = streamApplyReplacements(w, resp.Body, upstreamDomain, originalHost, runtime.ReplaceDict)
 		return
 	}
 
@@ -732,36 +731,161 @@ func removeVaryHeaderValue(vary, toRemove string) string {
 
 func applyReplacements(text, upstreamDomain, hostName string, replaceDict map[string]string) string {
 	out := text
+	for _, pair := range buildReplacementPairs(upstreamDomain, hostName, replaceDict) {
+		out = strings.ReplaceAll(out, pair.Old, pair.New)
+	}
+	return out
+}
+
+type replacementPair struct {
+	Old string
+	New string
+}
+
+type streamReplacement struct {
+	old  []byte
+	new  []byte
+	tail []byte
+}
+
+func buildReplacementPairs(upstreamDomain, hostName string, replaceDict map[string]string) []replacementPair {
 	keys := make([]string, 0, len(replaceDict))
 	for k := range replaceDict {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
+	pairs := make([]replacementPair, 0, len(keys))
 	for _, key := range keys {
 		rawValue := replaceDict[key]
-		resolvedKey := key
-		switch key {
-		case "$upstream", "$$upstream":
-			resolvedKey = upstreamDomain
-		case "$custom_domain", "$$custom_domain":
-			resolvedKey = hostName
-		}
-
-		resolvedValue := rawValue
-		switch rawValue {
-		case "$upstream", "$$upstream":
-			resolvedValue = upstreamDomain
-		case "$custom_domain", "$$custom_domain":
-			resolvedValue = hostName
-		}
-
+		resolvedKey := resolveReplacementToken(key, upstreamDomain, hostName)
 		if strings.TrimSpace(resolvedKey) == "" {
 			continue
 		}
-		out = strings.ReplaceAll(out, resolvedKey, resolvedValue)
+		resolvedValue := resolveReplacementToken(rawValue, upstreamDomain, hostName)
+		if resolvedKey == resolvedValue {
+			continue
+		}
+		pairs = append(pairs, replacementPair{Old: resolvedKey, New: resolvedValue})
 	}
-	return out
+	return pairs
+}
+
+func resolveReplacementToken(token, upstreamDomain, hostName string) string {
+	switch token {
+	case "$upstream", "$$upstream":
+		return upstreamDomain
+	case "$custom_domain", "$$custom_domain":
+		return hostName
+	default:
+		return token
+	}
+}
+
+func newStreamReplacement(oldValue, newValue string) *streamReplacement {
+	return &streamReplacement{
+		old: []byte(oldValue),
+		new: []byte(newValue),
+	}
+}
+
+func (sr *streamReplacement) transform(chunk []byte, final bool) []byte {
+	if len(sr.old) == 0 {
+		return append([]byte(nil), chunk...)
+	}
+
+	data := make([]byte, 0, len(sr.tail)+len(chunk))
+	data = append(data, sr.tail...)
+	data = append(data, chunk...)
+
+	flushLen := len(data)
+	if !final {
+		flushLen = len(data) - sr.pendingPrefixLen(data)
+		if flushLen <= 0 {
+			sr.tail = append(sr.tail[:0], data...)
+			return nil
+		}
+	}
+
+	toProcess := data[:flushLen]
+	if final {
+		sr.tail = sr.tail[:0]
+	} else {
+		sr.tail = append(sr.tail[:0], data[flushLen:]...)
+	}
+
+	if len(toProcess) == 0 {
+		return nil
+	}
+	if !bytes.Contains(toProcess, sr.old) {
+		return toProcess
+	}
+	return bytes.ReplaceAll(toProcess, sr.old, sr.new)
+}
+
+func (sr *streamReplacement) pendingPrefixLen(data []byte) int {
+	maxKeep := len(sr.old) - 1
+	if maxKeep <= 0 {
+		return 0
+	}
+	if len(data) < maxKeep {
+		maxKeep = len(data)
+	}
+	for keep := maxKeep; keep > 0; keep-- {
+		if bytes.HasSuffix(data, sr.old[:keep]) {
+			return keep
+		}
+	}
+	return 0
+}
+
+func streamApplyReplacements(dst io.Writer, src io.Reader, upstreamDomain, hostName string, replaceDict map[string]string) error {
+	pairs := buildReplacementPairs(upstreamDomain, hostName, replaceDict)
+	if len(pairs) == 0 {
+		_, err := io.Copy(dst, src)
+		return err
+	}
+
+	streamers := make([]*streamReplacement, 0, len(pairs))
+	for _, pair := range pairs {
+		if pair.Old == "" {
+			continue
+		}
+		streamers = append(streamers, newStreamReplacement(pair.Old, pair.New))
+	}
+	if len(streamers) == 0 {
+		_, err := io.Copy(dst, src)
+		return err
+	}
+
+	buf := make([]byte, streamRewriteChunkBytes)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			out := buf[:n]
+			for _, streamer := range streamers {
+				out = streamer.transform(out, false)
+			}
+			if len(out) > 0 {
+				if _, writeErr := dst.Write(out); writeErr != nil {
+					return writeErr
+				}
+			}
+		}
+		if err == io.EOF {
+			var out []byte
+			for _, streamer := range streamers {
+				out = streamer.transform(out, true)
+			}
+			if len(out) > 0 {
+				_, err = dst.Write(out)
+			}
+			return err
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func buildBadGateway(w http.ResponseWriter) {
