@@ -20,8 +20,12 @@ Hazuki 是一个 **单进程多端口** 的代理套件：内置 SQLite 配置�
 ```bash
 cd go
 cp .env.example .env
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
+
+默认会拉取 `ghcr.io/xmzo/hazuki-go:latest`。该镜像由 GitHub Actions 在 `main` 分支推送后自动编译并发布。
+如果你的 GHCR 包还是私有状态，需要先执行 `docker login ghcr.io`，或把该包改成 public 再让服务器匿名拉取。
 
 启动后打开：
 
@@ -63,6 +67,7 @@ docker compose up -d --build
 - 第一次访问会引导到 `http://你的服务器:3100/setup` 创建管理员；也可在 `go/.env` 里提前设置 `HAZUKI_ADMIN_USERNAME` / `HAZUKI_ADMIN_PASSWORD`（仅首次生效）。
 - `HAZUKI_MASTER_KEY` 用于敏感字段加密存储。已存在 `enc:v1:...` 数据时，启动必须提供同一个 key；轮换请在 `/system` 执行，以确保数据库内容重加密并同步更新环境变量。
 - Redis：Docker Compose 默认包含 Redis；如果你不用 Docker，请自行部署 Redis 并设置 `REDIS_HOST`/`REDIS_PORT`（也可在面板里改）。
+- 如果你部署的是自己的 fork，可在 `go/.env` 里设置 `HAZUKI_IMAGE=ghcr.io/<your-owner>/hazuki-go:latest`，让 compose 拉取你自己的 GHCR 镜像。
 
 ## 备份（导出/导入）
 

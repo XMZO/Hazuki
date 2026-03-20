@@ -13,9 +13,7 @@ services:
       retries: 3
 
   hazuki-go:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${HAZUKI_IMAGE:-ghcr.io/xmzo/hazuki-go:latest}
     container_name: hazuki-go
     restart: unless-stopped
     depends_on:

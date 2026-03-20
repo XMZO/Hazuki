@@ -1,37 +1,4 @@
-# Large / frequently-changing local data (should never be in build context)
-data/
-*.db
-*.db-*
-*.sqlite
-*.sqlite3
-*.sqlite3-*
-*.sqlite-*
-*.wal
-*.shm
-
-# Local env/secrets (runtime-mounted via docker-compose)
-.env
-.env.*
-!.env.example
-
-# Local build artifacts
-hazuki.exe
-*.exe
-*.out
-*.log
-
-# VCS / editor junk
-.git/
-.github/
-.vscode/
-.idea/
-*.swp
-*.tmp
-*.bak
-.DS_Store
-Thumbs.db
-
-# Node / frontend (if any)
-node_modules/
-dist/
-build/
+*
+!Dockerfile
+!dist/
+!dist/hazuki-go
