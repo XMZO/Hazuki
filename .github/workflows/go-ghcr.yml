@@ -62,7 +62,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p dist
-          go build -buildvcs=false -trimpath -ldflags "-s -w" -o dist/hazuki-go ./cmd/hazuki
+          go build -buildvcs=false -trimpath -ldflags "-s -w -buildid=" -o dist/hazuki-go ./cmd/hazuki
           sha256sum dist/hazuki-go > dist/hazuki-go.sha256
 
       - name: Upload binary artifact
