@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"hazuki-go/internal/model"
+	"hazuki-go/internal/proxy/gitproxy"
 	"hazuki-go/internal/rediscache"
 	"hazuki-go/internal/storage"
 )
@@ -95,6 +98,7 @@ func (s *server) system(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
+	gitRewriteData := s.buildGitHTMLRewriteData(r, cfg)
 	ports := cfg.Ports
 	if ports.Sakuya == 0 {
 		ports.Sakuya = 3200
@@ -186,7 +190,91 @@ func (s *server) system(w http.ResponseWriter, r *http.Request) {
 		}(),
 
 		Redis: checkRedisStatus(r.Context(), cfg.Cdnjs.Redis.Host, cfg.Cdnjs.Redis.Port),
+
+		GitHTMLRewrite: gitRewriteData,
 	})
+}
+
+func (s *server) systemGitRewriteStatus(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		// continue
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cfg, err := s.config.GetDecryptedConfig()
+	if err != nil {
+		http.Error(w, "Bad gateway", http.StatusBadGateway)
+		return
+	}
+
+	payload := map[string]any{
+		"ok":             true,
+		"time":           time.Now().UTC().Format(time.RFC3339Nano),
+		"gitHTMLRewrite": s.buildGitHTMLRewriteData(r, cfg),
+	}
+	b, _ := json.Marshal(payload)
+
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	w.Header().Set("cache-control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write(b)
+}
+
+func (s *server) buildGitHTMLRewriteData(r *http.Request, cfg model.AppConfig) systemGitHTMLRewriteData {
+	status := gitproxy.CurrentHTMLRewriteStatus()
+	unknownLength := "-"
+	if status.UnknownLengthStreams {
+		unknownLength = s.t(r, "system.gitRewrite.unknownLengthValue")
+	}
+	return systemGitHTMLRewriteData{
+		Enabled:       hasAnyEnabledGitProxy(cfg),
+		BudgetSource:  localizeGitRewriteBudgetSource(s, r, status.BudgetSource),
+		MemoryBudget:  formatOptionalBytes(status.MemoryBudgetBytes),
+		GoUsed:        formatOptionalBytes(status.GoMemoryUsedBytes),
+		Reserve:       formatOptionalBytes(status.RewriteReserveBytes),
+		Headroom:      formatOptionalBytes(status.HeadroomBytes),
+		BufferedLimit: formatOptionalBytes(status.BufferedLimitBytes),
+		StreamChunk:   formatOptionalBytes(int64(status.StreamChunkBytes)),
+		UnknownLength: unknownLength,
+	}
+}
+
+func localizeGitRewriteBudgetSource(s *server, r *http.Request, source string) string {
+	switch source {
+	case "gomemlimit":
+		return s.t(r, "system.gitRewrite.source.gomemlimit")
+	case "cgroup":
+		return s.t(r, "system.gitRewrite.source.cgroup")
+	case "memavailable":
+		return s.t(r, "system.gitRewrite.source.memavailable")
+	default:
+		return s.t(r, "system.gitRewrite.source.default")
+	}
+}
+
+func formatOptionalBytes(n int64) string {
+	if n <= 0 {
+		return "-"
+	}
+	return formatBytes(n)
+}
+
+func hasAnyEnabledGitProxy(cfg model.AppConfig) bool {
+	if !cfg.Git.Disabled {
+		return true
+	}
+	for _, inst := range cfg.GitInstances {
+		if !inst.Git.Disabled {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *server) systemTimeZone(w http.ResponseWriter, r *http.Request) {

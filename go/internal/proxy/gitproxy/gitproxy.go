@@ -81,6 +81,17 @@ type htmlRewritePlan struct {
 	StreamChunkBytes int
 }
 
+type HTMLRewriteStatus struct {
+	BudgetSource         string
+	MemoryBudgetBytes    int64
+	GoMemoryUsedBytes    int64
+	RewriteReserveBytes  int64
+	HeadroomBytes        int64
+	BufferedLimitBytes   int64
+	StreamChunkBytes     int
+	UnknownLengthStreams bool
+}
+
 func BuildRuntimeConfig(cfg model.AppConfig) (RuntimeConfig, error) {
 	upstream := strings.TrimSpace(cfg.Git.Upstream)
 	if upstream == "" {
@@ -646,6 +657,33 @@ func chooseHTMLRewritePlan(contentLength int64) htmlRewritePlan {
 	return deriveHTMLRewritePlan(currentMemoryBudgetBytes(), currentGoMemoryUsedBytes(), contentLength)
 }
 
+func CurrentHTMLRewriteStatus() HTMLRewriteStatus {
+	memoryBudgetBytes, budgetSource := currentMemoryBudgetStatus()
+	memoryUsedBytes := currentGoMemoryUsedBytes()
+	plan := deriveHTMLRewritePlan(memoryBudgetBytes, memoryUsedBytes, -1)
+
+	reserveBytes := int64(0)
+	headroomBytes := int64(0)
+	if memoryBudgetBytes > 0 {
+		reserveBytes = computeRewriteReserveBytes(memoryBudgetBytes)
+		headroomBytes = memoryBudgetBytes - memoryUsedBytes - reserveBytes
+		if headroomBytes < 0 {
+			headroomBytes = 0
+		}
+	}
+
+	return HTMLRewriteStatus{
+		BudgetSource:         budgetSource,
+		MemoryBudgetBytes:    memoryBudgetBytes,
+		GoMemoryUsedBytes:    memoryUsedBytes,
+		RewriteReserveBytes:  reserveBytes,
+		HeadroomBytes:        headroomBytes,
+		BufferedLimitBytes:   plan.BufferedLimit,
+		StreamChunkBytes:     plan.StreamChunkBytes,
+		UnknownLengthStreams: true,
+	}
+}
+
 func deriveHTMLRewritePlan(memoryBudgetBytes, memoryUsedBytes, contentLength int64) htmlRewritePlan {
 	plan := htmlRewritePlan{
 		BufferedLimit:    defaultBufferedRewriteBytes,
@@ -679,16 +717,21 @@ func computeRewriteReserveBytes(memoryBudgetBytes int64) int64 {
 }
 
 func currentMemoryBudgetBytes() int64 {
+	limit, _ := currentMemoryBudgetStatus()
+	return limit
+}
+
+func currentMemoryBudgetStatus() (int64, string) {
 	if limit := debug.SetMemoryLimit(-1); isUsableMemoryBudget(limit) {
-		return limit
+		return limit, "gomemlimit"
 	}
 	if limit := detectedStaticMemoryBudgetBytes(); isUsableMemoryBudget(limit) {
-		return limit
+		return limit, "cgroup"
 	}
 	if available := readMemAvailableBytes("/proc/meminfo"); isUsableMemoryBudget(available) {
-		return available
+		return available, "memavailable"
 	}
-	return 0
+	return 0, "default"
 }
 
 func detectStaticMemoryBudgetBytes() int64 {
@@ -1058,6 +1101,10 @@ func streamApplyReplacements(dst io.Writer, src io.Reader, upstreamDomain, hostN
 }
 
 func streamApplyReplacementsWithChunkSize(dst io.Writer, src io.Reader, upstreamDomain, hostName string, replaceDict map[string]string, chunkSize int) error {
+	if pair, ok := resolveSingleReplacement(replaceDict, upstreamDomain, hostName); ok {
+		return streamApplySingleReplacementWithChunkSize(dst, src, pair, chunkSize)
+	}
+
 	pairs := buildReplacementPairs(upstreamDomain, hostName, replaceDict)
 	if len(pairs) == 0 {
 		_, err := io.Copy(dst, src)
@@ -1106,6 +1153,125 @@ func streamApplyReplacementsWithChunkSize(dst io.Writer, src io.Reader, upstream
 			return err
 		}
 	}
+}
+
+func streamApplySingleReplacementWithChunkSize(dst io.Writer, src io.Reader, pair replacementPair, chunkSize int) error {
+	oldValue := []byte(pair.Old)
+	if len(oldValue) == 0 {
+		_, err := io.Copy(dst, src)
+		return err
+	}
+	newValue := []byte(pair.New)
+	buf := make([]byte, clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes))
+	tailCap := 0
+	if len(oldValue) > 1 {
+		tailCap = len(oldValue) - 1
+	}
+	tail := make([]byte, 0, tailCap)
+
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			final := err == io.EOF
+			data := make([]byte, 0, len(tail)+n)
+			data = append(data, tail...)
+			data = append(data, buf[:n]...)
+
+			if final {
+				return writeSingleReplacement(dst, data, oldValue, newValue)
+			}
+
+			flushUpto := len(data) - tailCap
+			if flushUpto <= 0 {
+				tail = append(tail[:0], data...)
+				continue
+			}
+
+			tailStart, writeErr := writeSingleReplacementChunk(dst, data, oldValue, newValue, flushUpto)
+			if writeErr != nil {
+				return writeErr
+			}
+			tail = append(tail[:0], data[tailStart:]...)
+		}
+		if err == io.EOF {
+			if len(tail) > 0 {
+				return writeSingleReplacement(dst, tail, oldValue, newValue)
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func writeSingleReplacementChunk(dst io.Writer, data, oldValue, newValue []byte, flushUpto int) (int, error) {
+	if flushUpto <= 0 {
+		return 0, nil
+	}
+	if flushUpto >= len(data) {
+		return len(data), writeSingleReplacement(dst, data, oldValue, newValue)
+	}
+
+	start := 0
+	searchFrom := 0
+	for {
+		idx := bytes.Index(data[searchFrom:], oldValue)
+		if idx < 0 {
+			break
+		}
+		idx += searchFrom
+		if idx >= flushUpto {
+			break
+		}
+		if idx > start {
+			if _, err := dst.Write(data[start:idx]); err != nil {
+				return 0, err
+			}
+		}
+		if len(newValue) > 0 {
+			if _, err := dst.Write(newValue); err != nil {
+				return 0, err
+			}
+		}
+		start = idx + len(oldValue)
+		searchFrom = start
+	}
+	if start < flushUpto {
+		if _, err := dst.Write(data[start:flushUpto]); err != nil {
+			return 0, err
+		}
+		return flushUpto, nil
+	}
+	return start, nil
+}
+
+func writeSingleReplacement(dst io.Writer, data, oldValue, newValue []byte) error {
+	start := 0
+	for {
+		idx := bytes.Index(data[start:], oldValue)
+		if idx < 0 {
+			break
+		}
+		idx += start
+		if idx > start {
+			if _, err := dst.Write(data[start:idx]); err != nil {
+				return err
+			}
+		}
+		if len(newValue) > 0 {
+			if _, err := dst.Write(newValue); err != nil {
+				return err
+			}
+		}
+		start = idx + len(oldValue)
+	}
+	if start < len(data) {
+		if _, err := dst.Write(data[start:]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func buildBadGateway(w http.ResponseWriter) {

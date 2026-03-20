@@ -55,6 +55,32 @@
       </div>
     </div>
 
+    <div class="card" data-hz-git-rewrite-card>
+      <h3>{{.T "system.gitRewriteTitle"}}</h3>
+      <div class="muted small">{{.T "system.gitRewriteHint"}}</div>
+      <div class="kvs" style="margin-top:12px;" data-hz-git-rewrite-enabled {{if not .GitHTMLRewrite.Enabled}}hidden{{end}}>
+          <div class="muted">{{.T "system.gitRewrite.budgetSource"}}</div>
+          <div><code data-hz-git-rewrite-field="budgetSource">{{.GitHTMLRewrite.BudgetSource}}</code></div>
+          <div class="muted">{{.T "system.gitRewrite.memoryBudget"}}</div>
+          <div><code data-hz-git-rewrite-field="memoryBudget">{{.GitHTMLRewrite.MemoryBudget}}</code></div>
+          <div class="muted">{{.T "system.gitRewrite.goUsed"}}</div>
+          <div><code data-hz-git-rewrite-field="goUsed">{{.GitHTMLRewrite.GoUsed}}</code></div>
+          <div class="muted">{{.T "system.gitRewrite.reserve"}}</div>
+          <div><code data-hz-git-rewrite-field="reserve">{{.GitHTMLRewrite.Reserve}}</code></div>
+          <div class="muted">{{.T "system.gitRewrite.headroom"}}</div>
+          <div><code data-hz-git-rewrite-field="headroom">{{.GitHTMLRewrite.Headroom}}</code></div>
+          <div class="muted">{{.T "system.gitRewrite.bufferedLimit"}}</div>
+          <div><code data-hz-git-rewrite-field="bufferedLimit">{{.GitHTMLRewrite.BufferedLimit}}</code></div>
+          <div class="muted">{{.T "system.gitRewrite.streamChunk"}}</div>
+          <div><code data-hz-git-rewrite-field="streamChunk">{{.GitHTMLRewrite.StreamChunk}}</code></div>
+          <div class="muted">{{.T "system.gitRewrite.unknownLength"}}</div>
+          <div><code data-hz-git-rewrite-field="unknownLength">{{.GitHTMLRewrite.UnknownLength}}</code></div>
+      </div>
+      <div style="margin-top:12px;" data-hz-git-rewrite-disabled {{if .GitHTMLRewrite.Enabled}}hidden{{end}}>
+          <span class="pill err">{{.T "common.disabled"}}</span>
+      </div>
+    </div>
+
     <div class="card">
       <h3>{{.T "system.timezoneTitle"}}</h3>
       <div class="muted small">{{.T "system.timezoneHint"}}</div>

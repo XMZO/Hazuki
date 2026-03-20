@@ -157,6 +157,10 @@
   let trafficAbort = null;
   let trafficSeq = 0;
 
+  let systemTimer = null;
+  let systemAbort = null;
+  let systemSeq = 0;
+
   const stopDashboardStats = () => {
     if (dashTimer) {
       clearInterval(dashTimer);
@@ -374,6 +378,110 @@
       }
     }
     trafficAbort = null;
+  };
+
+  const stopSystemPage = () => {
+    if (systemTimer) {
+      clearInterval(systemTimer);
+      systemTimer = null;
+    }
+    if (systemAbort && typeof systemAbort.abort === "function") {
+      try {
+        systemAbort.abort();
+      } catch {
+        // ignore
+      }
+    }
+    systemAbort = null;
+  };
+
+  const updateSystemGitRewriteDom = (info) => {
+    const card = qs("[data-hz-git-rewrite-card]");
+    if (!card) return;
+
+    const enabled = !!(info && info.enabled);
+    const enabledEl = qs("[data-hz-git-rewrite-enabled]", card);
+    const disabledEl = qs("[data-hz-git-rewrite-disabled]", card);
+    if (enabledEl) enabledEl.hidden = !enabled;
+    if (disabledEl) disabledEl.hidden = enabled;
+
+    const values = {
+      budgetSource: (info && info.budgetSource) || "-",
+      memoryBudget: (info && info.memoryBudget) || "-",
+      goUsed: (info && info.goUsed) || "-",
+      reserve: (info && info.reserve) || "-",
+      headroom: (info && info.headroom) || "-",
+      bufferedLimit: (info && info.bufferedLimit) || "-",
+      streamChunk: (info && info.streamChunk) || "-",
+      unknownLength: (info && info.unknownLength) || "-",
+    };
+
+    for (const el of qsa("[data-hz-git-rewrite-field]", card)) {
+      const field = (el.getAttribute("data-hz-git-rewrite-field") || "").trim();
+      if (!field) continue;
+      if (Object.prototype.hasOwnProperty.call(values, field)) {
+        el.textContent = values[field];
+      }
+    }
+  };
+
+  const pollSystemGitRewrite = async () => {
+    const page = (document.body && document.body.getAttribute("data-page")) || "";
+    if (page !== "system") {
+      stopSystemPage();
+      return;
+    }
+
+    const mySeq = (systemSeq += 1);
+    if (systemAbort && typeof systemAbort.abort === "function") {
+      try {
+        systemAbort.abort();
+      } catch {
+        // ignore
+      }
+    }
+
+    let signal = null;
+    if (typeof AbortController === "function") {
+      systemAbort = new AbortController();
+      signal = systemAbort.signal;
+    } else {
+      systemAbort = null;
+    }
+
+    try {
+      const opts = { method: "GET", headers: { Accept: "application/json" }, credentials: "same-origin" };
+      if (signal) opts.signal = signal;
+
+      const resp = await fetch("/_hazuki/system/git-rewrite", opts);
+      if (mySeq !== systemSeq) return;
+
+      const ct = (resp.headers.get("content-type") || "").toLowerCase();
+      if (!resp.ok || !ct.includes("application/json")) {
+        return;
+      }
+
+      const payload = await resp.json();
+      if (mySeq !== systemSeq) return;
+
+      updateSystemGitRewriteDom(payload && payload.gitHTMLRewrite ? payload.gitHTMLRewrite : null);
+    } catch {
+      if (systemAbort && systemAbort.signal && systemAbort.signal.aborted) {
+        return;
+      }
+    }
+  };
+
+  const ensureSystemPage = () => {
+    const page = (document.body && document.body.getAttribute("data-page")) || "";
+    if (page !== "system") {
+      stopSystemPage();
+      return;
+    }
+
+    if (systemTimer) return;
+    pollSystemGitRewrite();
+    systemTimer = setInterval(pollSystemGitRewrite, 5000);
   };
 
   const pad2 = (n) => String(n).padStart(2, "0");
@@ -1215,6 +1323,7 @@
     updateTorcherinoPreview();
     ensureDashboardStats();
     ensureTrafficPage();
+    ensureSystemPage();
   };
 
   const updateNavActive = (pathname) => {

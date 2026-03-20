@@ -254,6 +254,20 @@ type systemData struct {
 	PatchouliStatus    serviceStatus
 
 	Redis redisStatus
+
+	GitHTMLRewrite systemGitHTMLRewriteData
+}
+
+type systemGitHTMLRewriteData struct {
+	Enabled       bool   `json:"enabled"`
+	BudgetSource  string `json:"budgetSource"`
+	MemoryBudget  string `json:"memoryBudget"`
+	GoUsed        string `json:"goUsed"`
+	Reserve       string `json:"reserve"`
+	Headroom      string `json:"headroom"`
+	BufferedLimit string `json:"bufferedLimit"`
+	StreamChunk   string `json:"streamChunk"`
+	UnknownLength string `json:"unknownLength"`
 }
 
 type redisCacheEntry struct {
