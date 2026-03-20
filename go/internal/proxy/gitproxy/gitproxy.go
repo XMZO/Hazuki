@@ -1058,10 +1058,6 @@ func streamApplyReplacements(dst io.Writer, src io.Reader, upstreamDomain, hostN
 }
 
 func streamApplyReplacementsWithChunkSize(dst io.Writer, src io.Reader, upstreamDomain, hostName string, replaceDict map[string]string, chunkSize int) error {
-	if pair, ok := resolveSingleReplacement(replaceDict, upstreamDomain, hostName); ok {
-		return streamApplySingleReplacementWithChunkSize(dst, src, pair, chunkSize)
-	}
-
 	pairs := buildReplacementPairs(upstreamDomain, hostName, replaceDict)
 	if len(pairs) == 0 {
 		_, err := io.Copy(dst, src)
@@ -1099,34 +1095,6 @@ func streamApplyReplacementsWithChunkSize(dst io.Writer, src io.Reader, upstream
 			for _, streamer := range streamers {
 				out = streamer.transform(out, true)
 			}
-			if len(out) > 0 {
-				if _, writeErr := dst.Write(out); writeErr != nil {
-					return writeErr
-				}
-			}
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-	}
-}
-
-func streamApplySingleReplacementWithChunkSize(dst io.Writer, src io.Reader, pair replacementPair, chunkSize int) error {
-	streamer := newStreamReplacement(pair.Old, pair.New)
-	buf := make([]byte, clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes))
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			out := streamer.transform(buf[:n], false)
-			if len(out) > 0 {
-				if _, writeErr := dst.Write(out); writeErr != nil {
-					return writeErr
-				}
-			}
-		}
-		if err == io.EOF {
-			out := streamer.transform(nil, true)
 			if len(out) > 0 {
 				if _, writeErr := dst.Write(out); writeErr != nil {
 					return writeErr
