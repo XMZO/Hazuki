@@ -17,6 +17,8 @@ import (
 
 	"hazuki-go/internal/model"
 	"hazuki-go/internal/proxy/gitproxy"
+	"hazuki-go/internal/proxy/rewritebudget"
+	"hazuki-go/internal/proxy/torcherinoproxy"
 	"hazuki-go/internal/rediscache"
 	"hazuki-go/internal/storage"
 )
@@ -99,6 +101,7 @@ func (s *server) system(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	gitRewriteData := s.buildGitHTMLRewriteData(r, cfg)
+	rewriteRuntimeData := s.buildRewriteRuntimeData(r, cfg)
 	ports := cfg.Ports
 	if ports.Sakuya == 0 {
 		ports.Sakuya = 3200
@@ -192,6 +195,7 @@ func (s *server) system(w http.ResponseWriter, r *http.Request) {
 		Redis: checkRedisStatus(r.Context(), cfg.Cdnjs.Redis.Host, cfg.Cdnjs.Redis.Port),
 
 		GitHTMLRewrite: gitRewriteData,
+		RewriteRuntime: rewriteRuntimeData,
 	})
 }
 
@@ -226,26 +230,113 @@ func (s *server) systemGitRewriteStatus(w http.ResponseWriter, r *http.Request) 
 	_, _ = w.Write(b)
 }
 
+func (s *server) systemRewriteRuntimeStatus(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		// continue
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cfg, err := s.config.GetDecryptedConfig()
+	if err != nil {
+		http.Error(w, "Bad gateway", http.StatusBadGateway)
+		return
+	}
+
+	payload := map[string]any{
+		"ok":             true,
+		"time":           time.Now().UTC().Format(time.RFC3339Nano),
+		"rewriteRuntime": s.buildRewriteRuntimeData(r, cfg),
+	}
+	b, _ := json.Marshal(payload)
+
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	w.Header().Set("cache-control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write(b)
+}
+
 func (s *server) buildGitHTMLRewriteData(r *http.Request, cfg model.AppConfig) systemGitHTMLRewriteData {
 	status := gitproxy.CurrentHTMLRewriteStatus()
 	unknownLength := "-"
 	if status.UnknownLengthStreams {
 		unknownLength = s.t(r, "system.gitRewrite.unknownLengthValue")
 	}
+	samplesText := strconv.FormatInt(status.BufferedSamples, 10) + " / " + strconv.FormatInt(status.StreamingSamples, 10)
 	return systemGitHTMLRewriteData{
-		Enabled:       hasAnyEnabledGitProxy(cfg),
-		BudgetSource:  localizeGitRewriteBudgetSource(s, r, status.BudgetSource),
-		MemoryBudget:  formatOptionalBytes(status.MemoryBudgetBytes),
-		GoUsed:        formatOptionalBytes(status.GoMemoryUsedBytes),
-		Reserve:       formatOptionalBytes(status.RewriteReserveBytes),
-		Headroom:      formatOptionalBytes(status.HeadroomBytes),
-		BufferedLimit: formatOptionalBytes(status.BufferedLimitBytes),
-		StreamChunk:   formatOptionalBytes(int64(status.StreamChunkBytes)),
-		UnknownLength: unknownLength,
+		Enabled:            hasAnyEnabledGitProxy(cfg),
+		BudgetSource:       localizeRewriteBudgetSource(s, r, status.BudgetSource),
+		MemoryBudget:       formatOptionalBytes(status.MemoryBudgetBytes),
+		GoUsed:             formatOptionalBytes(status.GoMemoryUsedBytes),
+		EffectiveUsed:      formatOptionalBytes(status.EffectiveUsedBytes),
+		CgroupCurrent:      formatOptionalBytes(status.CgroupCurrentBytes),
+		CgroupEvents:       formatCgroupEvents(status.CgroupHighEvents, status.CgroupMaxEvents, status.CgroupOOMEvents, status.CgroupOOMKillEvents),
+		Reserve:            formatOptionalBytes(status.RewriteReserveBytes),
+		Headroom:           formatOptionalBytes(status.HeadroomBytes),
+		BufferedLimit:      formatOptionalBytes(status.BufferedLimitBytes),
+		StreamChunk:        formatOptionalBytes(int64(status.StreamChunkBytes)),
+		UnknownLength:      unknownLength,
+		ActiveRewrites:     formatOptionalCount(status.ActiveRewrites),
+		CalibrationSamples: samplesText,
+		RecentHTMLP90:      formatOptionalBytes(status.RecentHTMLP90Bytes),
+		BufferedCostFactor: formatOptionalMilliRatio(status.BufferedCostMultiplierMilli, "x"),
+		UsableShare:        formatOptionalMilliPercent(status.UsableShareMilli),
+		BufferedSpeed:      formatOptionalRate(status.BufferedThroughputBytesPerSec),
+		StreamSpeed:        formatOptionalRate(status.StreamingThroughputBytesPerSec),
 	}
 }
 
-func localizeGitRewriteBudgetSource(s *server, r *http.Request, source string) string {
+func (s *server) buildRewriteRuntimeData(r *http.Request, cfg model.AppConfig) systemRewriteRuntimeData {
+	shared := rewritebudget.CurrentMemoryStatus()
+	sharedActiveRewrites := rewritebudget.CurrentActiveCount()
+	gitStatus := gitproxy.CurrentHTMLRewriteStatus()
+	torcherinoStatus := torcherinoproxy.CurrentRewriteStatus()
+
+	return systemRewriteRuntimeData{
+		Shared: systemRewriteRuntimeSharedData{
+			BudgetSource:   localizeRewriteBudgetSource(s, r, shared.BudgetSource),
+			MemoryBudget:   formatOptionalBytes(shared.MemoryBudgetBytes),
+			GoUsed:         formatOptionalBytes(shared.GoMemoryUsedBytes),
+			EffectiveUsed:  formatOptionalBytes(shared.EffectiveUsedBytes),
+			CgroupCurrent:  formatOptionalBytes(shared.CgroupCurrentBytes),
+			CgroupEvents:   formatCgroupEvents(shared.CgroupHighEvents, shared.CgroupMaxEvents, shared.CgroupOOMEvents, shared.CgroupOOMKillEvents),
+			ActiveRewrites: formatOptionalCount(sharedActiveRewrites),
+		},
+		GitHTML:        s.buildRewriteTunerData(r, hasAnyEnabledGitProxy(cfg), gitStatus.ActiveRewrites, gitStatus.RewriteReserveBytes, gitStatus.HeadroomBytes, gitStatus.BufferedLimitBytes, gitStatus.StreamChunkBytes, gitStatus.UnknownLengthStreams, gitStatus.BufferedSamples, gitStatus.StreamingSamples, gitStatus.RecentHTMLP90Bytes, gitStatus.BufferedCostMultiplierMilli, gitStatus.UsableShareMilli, gitStatus.BufferedThroughputBytesPerSec, gitStatus.StreamingThroughputBytesPerSec),
+		TorcherinoHTML: s.buildRewriteTunerData(r, !cfg.Torcherino.Disabled, torcherinoStatus.HTML.ActiveRewrites, torcherinoStatus.HTML.RewriteReserveBytes, torcherinoStatus.HTML.HeadroomBytes, torcherinoStatus.HTML.BufferedLimitBytes, torcherinoStatus.HTML.StreamChunkBytes, torcherinoStatus.HTML.UnknownLengthStreams, torcherinoStatus.HTML.BufferedSamples, torcherinoStatus.HTML.StreamingSamples, torcherinoStatus.HTML.RecentBodyP90Bytes, torcherinoStatus.HTML.BufferedCostMultiplierMilli, torcherinoStatus.HTML.UsableShareMilli, torcherinoStatus.HTML.BufferedThroughputBytesPerSec, torcherinoStatus.HTML.StreamingThroughputBytesPerSec),
+		TorcherinoJSON: s.buildRewriteTunerData(r, !cfg.Torcherino.Disabled, torcherinoStatus.JSON.ActiveRewrites, torcherinoStatus.JSON.RewriteReserveBytes, torcherinoStatus.JSON.HeadroomBytes, torcherinoStatus.JSON.BufferedLimitBytes, torcherinoStatus.JSON.StreamChunkBytes, torcherinoStatus.JSON.UnknownLengthStreams, torcherinoStatus.JSON.BufferedSamples, torcherinoStatus.JSON.StreamingSamples, torcherinoStatus.JSON.RecentBodyP90Bytes, torcherinoStatus.JSON.BufferedCostMultiplierMilli, torcherinoStatus.JSON.UsableShareMilli, torcherinoStatus.JSON.BufferedThroughputBytesPerSec, torcherinoStatus.JSON.StreamingThroughputBytesPerSec),
+	}
+}
+
+func (s *server) buildRewriteTunerData(r *http.Request, enabled bool, activeRewrites, reserveBytes, headroomBytes, bufferedLimitBytes int64, streamChunkBytes int, unknownLengthStreams bool, bufferedSamples, streamingSamples, recentBodyP90Bytes int64, bufferedCostMilli, usableShareMilli int, bufferedThroughputBytesPerSec, streamingThroughputBytesPerSec int64) systemRewriteRuntimeTunerData {
+	unknownLength := "-"
+	if unknownLengthStreams {
+		unknownLength = s.t(r, "system.rewriteRuntime.unknownLengthValue")
+	}
+	samplesText := strconv.FormatInt(bufferedSamples, 10) + " / " + strconv.FormatInt(streamingSamples, 10)
+	return systemRewriteRuntimeTunerData{
+		Enabled:            enabled,
+		ActiveRewrites:     formatOptionalCount(activeRewrites),
+		Reserve:            formatOptionalBytes(reserveBytes),
+		Headroom:           formatOptionalBytes(headroomBytes),
+		BufferedLimit:      formatOptionalBytes(bufferedLimitBytes),
+		StreamChunk:        formatOptionalBytes(int64(streamChunkBytes)),
+		UnknownLength:      unknownLength,
+		CalibrationSamples: samplesText,
+		RecentBodyP90:      formatOptionalBytes(recentBodyP90Bytes),
+		BufferedCostFactor: formatOptionalMilliRatio(bufferedCostMilli, "x"),
+		UsableShare:        formatOptionalMilliPercent(usableShareMilli),
+		BufferedSpeed:      formatOptionalRate(bufferedThroughputBytesPerSec),
+		StreamSpeed:        formatOptionalRate(streamingThroughputBytesPerSec),
+	}
+}
+
+func localizeRewriteBudgetSource(s *server, r *http.Request, source string) string {
 	switch source {
 	case "gomemlimit":
 		return s.t(r, "system.gitRewrite.source.gomemlimit")
@@ -263,6 +354,44 @@ func formatOptionalBytes(n int64) string {
 		return "-"
 	}
 	return formatBytes(n)
+}
+
+func formatOptionalRate(n int64) string {
+	if n <= 0 {
+		return "-"
+	}
+	return formatBytes(n) + "/s"
+}
+
+func formatOptionalCount(n int64) string {
+	if n <= 0 {
+		return "0"
+	}
+	return strconv.FormatInt(n, 10)
+}
+
+func formatOptionalMilliPercent(milli int) string {
+	if milli <= 0 {
+		return "-"
+	}
+	return strconv.FormatFloat(float64(milli)/10, 'f', 1, 64) + "%"
+}
+
+func formatOptionalMilliRatio(milli int, suffix string) string {
+	if milli <= 0 {
+		return "-"
+	}
+	return strconv.FormatFloat(float64(milli)/1000, 'f', 3, 64) + suffix
+}
+
+func formatCgroupEvents(high, maxv, oom, oomKill int64) string {
+	if high <= 0 && maxv <= 0 && oom <= 0 && oomKill <= 0 {
+		return "0 / 0 / 0 / 0"
+	}
+	return strconv.FormatInt(high, 10) + " / " +
+		strconv.FormatInt(maxv, 10) + " / " +
+		strconv.FormatInt(oom, 10) + " / " +
+		strconv.FormatInt(oomKill, 10)
 }
 
 func hasAnyEnabledGitProxy(cfg model.AppConfig) bool {

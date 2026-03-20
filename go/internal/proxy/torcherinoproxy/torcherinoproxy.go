@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"hazuki-go/internal/model"
+	"hazuki-go/internal/proxy/rewritebudget"
 	"hazuki-go/internal/proxy/upstreamhttp"
 	"hazuki-go/internal/rediscache"
 )
@@ -282,30 +283,72 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 	}
 
 	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
-	shouldRewrite := strings.Contains(contentType, "application/json") || strings.Contains(contentType, "text/html")
-	if shouldRewrite {
-		raw, err := io.ReadAll(resp.Body)
-		if err != nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte("Bad Gateway"))
-			return
-		}
-		rewritten := rewriteBody(string(raw), reqOrigin)
+	rewriteKind := detectRewriteKind(contentType)
+	if rewriteKind != rewriteKindNone {
+		finishRewrite := beginRewrite(rewriteKind)
+		defer finishRewrite()
 
+		rewritePlan := torcherinoRewritePlanner(rewriteKind, resp.ContentLength)
 		copyResponseHeaders(w.Header(), resp.Header, false)
 		w.Header().Del("Content-Length")
 		w.Header().Del("Transfer-Encoding")
-		w.Header().Set("Content-Length", strconvItoa(len([]byte(rewritten))))
+
+		if rewritePlan.Buffered {
+			startedAt := time.Now()
+			beforeUsed := rewritebudget.CurrentMemoryStatus().GoMemoryUsedBytes
+			raw, err := io.ReadAll(resp.Body)
+			if err != nil {
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte("Bad Gateway"))
+				return
+			}
+			afterReadUsed := rewritebudget.CurrentMemoryStatus().GoMemoryUsedBytes
+			rewritten := rewriteResponseBuffered(raw, reqOrigin)
+			afterRewriteUsed := rewritebudget.CurrentMemoryStatus().GoMemoryUsedBytes
+			w.Header().Set("Content-Length", strconvItoa(len(rewritten)))
+			w.WriteHeader(resp.StatusCode)
+			if cacheEligibleReq && r.Method == http.MethodGet {
+				go cacheRespIfEligible(redisClient, cacheCfg, cacheKey, resp.StatusCode, resp.Header, raw)
+			}
+			if r.Method == http.MethodHead {
+				return
+			}
+			if _, err := io.WriteString(w, rewritten); err == nil {
+				currentRewriteTuner(rewriteKind).observeBuffered(
+					int64(len(raw)),
+					int64(len(rewritten)),
+					time.Since(startedAt),
+					maxInt64Value(
+						positiveDeltaInt64(afterReadUsed, beforeUsed),
+						positiveDeltaInt64(afterRewriteUsed, beforeUsed),
+					),
+				)
+			}
+			return
+		}
 
 		w.WriteHeader(resp.StatusCode)
-		if cacheEligibleReq && r.Method == http.MethodGet {
-			go cacheRespIfEligible(redisClient, cacheCfg, cacheKey, resp.StatusCode, resp.Header, raw)
-		}
 		if r.Method == http.MethodHead {
 			return
 		}
-		_, _ = io.Copy(w, bytes.NewBufferString(rewritten))
+
+		startedAt := time.Now()
+		var src io.Reader = resp.Body
+		var capture *limitedCaptureBuffer
+		if cacheEligibleReq && r.Method == http.MethodGet && cacheCfg.MaxBodyBytes > 0 {
+			capture = newLimitedCaptureBuffer(cacheCfg.MaxBodyBytes)
+			src = io.TeeReader(resp.Body, capture)
+		}
+		countedBody := &countingReader{src: src}
+		if err := streamRewriteBodyWithChunkSize(w, countedBody, reqOrigin, rewritePlan.StreamChunkBytes); err == nil {
+			currentRewriteTuner(rewriteKind).observeStreaming(countedBody.n, time.Since(startedAt))
+			if capture != nil {
+				if raw, ok := capture.Bytes(); ok {
+					go cacheRespIfEligible(redisClient, cacheCfg, cacheKey, resp.StatusCode, resp.Header, raw)
+				}
+			}
+		}
 		return
 	}
 
@@ -690,17 +733,42 @@ func writeCachedResponse(w http.ResponseWriter, r *http.Request, body []byte, me
 	}
 
 	contentType := strings.ToLower(strings.TrimSpace(meta.Type))
-	shouldRewrite := strings.Contains(contentType, "application/json") || strings.Contains(contentType, "text/html")
-	if shouldRewrite {
-		rewritten := rewriteBody(string(body), reqOrigin)
+	rewriteKind := detectRewriteKind(contentType)
+	if rewriteKind != rewriteKindNone {
+		finishRewrite := beginRewrite(rewriteKind)
+		defer finishRewrite()
+
+		rewritePlan := torcherinoRewritePlanner(rewriteKind, int64(len(body)))
 		w.Header().Del("Content-Length")
 		w.Header().Del("Transfer-Encoding")
-		w.Header().Set("Content-Length", strconvItoa(len([]byte(rewritten))))
+
+		if rewritePlan.Buffered {
+			startedAt := time.Now()
+			rewritten := rewriteResponseBuffered(body, reqOrigin)
+			w.Header().Set("Content-Length", strconvItoa(len(rewritten)))
+			w.WriteHeader(statusCode)
+			if r.Method == http.MethodHead {
+				return
+			}
+			if _, err := io.WriteString(w, rewritten); err == nil {
+				currentRewriteTuner(rewriteKind).observeBuffered(
+					int64(len(body)),
+					int64(len(rewritten)),
+					time.Since(startedAt),
+					0,
+				)
+			}
+			return
+		}
+
 		w.WriteHeader(statusCode)
 		if r.Method == http.MethodHead {
 			return
 		}
-		_, _ = io.Copy(w, bytes.NewBufferString(rewritten))
+		startedAt := time.Now()
+		if err := streamRewriteBodyWithChunkSize(w, bytes.NewReader(body), reqOrigin, rewritePlan.StreamChunkBytes); err == nil {
+			currentRewriteTuner(rewriteKind).observeStreaming(int64(len(body)), time.Since(startedAt))
+		}
 		return
 	}
 

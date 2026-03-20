@@ -61,29 +61,122 @@
         </div>
       </div>
 
-      <div class="card hz-system-wide hz-anchor" id="system-git-rewrite" data-hz-git-rewrite-card>
-        <h3>{{.T "system.gitRewriteTitle"}}</h3>
-        <div class="muted small">{{.T "system.gitRewriteHint"}}</div>
-        <div class="kvs" style="margin-top:12px;" data-hz-git-rewrite-enabled {{if not .GitHTMLRewrite.Enabled}}hidden{{end}}>
-          <div class="muted">{{.T "system.gitRewrite.budgetSource"}}</div>
-          <div><code data-hz-git-rewrite-field="budgetSource">{{.GitHTMLRewrite.BudgetSource}}</code></div>
-          <div class="muted">{{.T "system.gitRewrite.memoryBudget"}}</div>
-          <div><code data-hz-git-rewrite-field="memoryBudget">{{.GitHTMLRewrite.MemoryBudget}}</code></div>
-          <div class="muted">{{.T "system.gitRewrite.goUsed"}}</div>
-          <div><code data-hz-git-rewrite-field="goUsed">{{.GitHTMLRewrite.GoUsed}}</code></div>
-          <div class="muted">{{.T "system.gitRewrite.reserve"}}</div>
-          <div><code data-hz-git-rewrite-field="reserve">{{.GitHTMLRewrite.Reserve}}</code></div>
-          <div class="muted">{{.T "system.gitRewrite.headroom"}}</div>
-          <div><code data-hz-git-rewrite-field="headroom">{{.GitHTMLRewrite.Headroom}}</code></div>
-          <div class="muted">{{.T "system.gitRewrite.bufferedLimit"}}</div>
-          <div><code data-hz-git-rewrite-field="bufferedLimit">{{.GitHTMLRewrite.BufferedLimit}}</code></div>
-          <div class="muted">{{.T "system.gitRewrite.streamChunk"}}</div>
-          <div><code data-hz-git-rewrite-field="streamChunk">{{.GitHTMLRewrite.StreamChunk}}</code></div>
-          <div class="muted">{{.T "system.gitRewrite.unknownLength"}}</div>
-          <div><code data-hz-git-rewrite-field="unknownLength">{{.GitHTMLRewrite.UnknownLength}}</code></div>
+      <div class="card hz-system-wide hz-anchor hz-rewrite-runtime" id="system-rewrite-runtime" data-hz-rewrite-runtime-card>
+        <div class="hz-rewrite-runtime-head">
+          <div>
+            <h3>{{.T "system.rewriteRuntimeTitle"}}</h3>
+            <div class="muted small">{{.T "system.rewriteRuntimeHint"}}</div>
+          </div>
+          <div class="segmented" data-hz-rewrite-tabs>
+            <button class="seg active" type="button" data-hz-rewrite-tab="gitHTML">{{.T "system.rewriteRuntime.tab.gitHTML"}}</button>
+            <button class="seg" type="button" data-hz-rewrite-tab="torcherinoHTML">{{.T "system.rewriteRuntime.tab.torcherinoHTML"}}</button>
+            <button class="seg" type="button" data-hz-rewrite-tab="torcherinoJSON">{{.T "system.rewriteRuntime.tab.torcherinoJSON"}}</button>
+          </div>
         </div>
-        <div style="margin-top:12px;" data-hz-git-rewrite-disabled {{if .GitHTMLRewrite.Enabled}}hidden{{end}}>
-          <span class="pill err">{{.T "common.disabled"}}</span>
+
+        <div class="hz-metric-grid hz-metric-grid-summary">
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.gitRewrite.budgetSource"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.budgetSource">{{.RewriteRuntime.Shared.BudgetSource}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.gitRewrite.memoryBudget"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.memoryBudget">{{.RewriteRuntime.Shared.MemoryBudget}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.gitRewrite.goUsed"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.goUsed">{{.RewriteRuntime.Shared.GoUsed}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.gitRewrite.effectiveUsed"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.effectiveUsed">{{.RewriteRuntime.Shared.EffectiveUsed}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.gitRewrite.cgroupCurrent"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.cgroupCurrent">{{.RewriteRuntime.Shared.CgroupCurrent}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.gitRewrite.cgroupEvents"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.cgroupEvents">{{.RewriteRuntime.Shared.CgroupEvents}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.activeRewrites">{{.RewriteRuntime.Shared.ActiveRewrites}}</code></div>
+          </div>
+        </div>
+
+        <div class="hz-rewrite-panels">
+          <section class="hz-rewrite-panel" data-hz-rewrite-panel="gitHTML">
+            <div class="hz-rewrite-panel-head">
+              <div>
+                <div class="hz-rewrite-panel-title">{{.T "system.rewriteRuntime.tab.gitHTML"}}</div>
+                <div class="muted small">{{.T "system.rewriteRuntime.gitHint"}}</div>
+              </div>
+              <span class="pill {{if .RewriteRuntime.GitHTML.Enabled}}ok{{else}}err{{end}}" data-hz-rewrite-enabled-pill="gitHTML">{{if .RewriteRuntime.GitHTML.Enabled}}{{.T "common.enabled"}}{{else}}{{.T "common.disabled"}}{{end}}</span>
+            </div>
+            <div class="hz-metric-grid hz-metric-grid-detail">
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.activeRewrites">{{.RewriteRuntime.GitHTML.ActiveRewrites}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.reserve"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.reserve">{{.RewriteRuntime.GitHTML.Reserve}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.headroom"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.headroom">{{.RewriteRuntime.GitHTML.Headroom}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedLimit"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.bufferedLimit">{{.RewriteRuntime.GitHTML.BufferedLimit}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamChunk"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.streamChunk">{{.RewriteRuntime.GitHTML.StreamChunk}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.unknownLength"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.unknownLength">{{.RewriteRuntime.GitHTML.UnknownLength}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.calibrationSamples"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.calibrationSamples">{{.RewriteRuntime.GitHTML.CalibrationSamples}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.recentBodyP90"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.recentBodyP90">{{.RewriteRuntime.GitHTML.RecentBodyP90}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedCostFactor"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.bufferedCostFactor">{{.RewriteRuntime.GitHTML.BufferedCostFactor}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.usableShare"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.usableShare">{{.RewriteRuntime.GitHTML.UsableShare}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.bufferedSpeed">{{.RewriteRuntime.GitHTML.BufferedSpeed}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.streamSpeed">{{.RewriteRuntime.GitHTML.StreamSpeed}}</code></div></div>
+            </div>
+          </section>
+
+          <section class="hz-rewrite-panel" data-hz-rewrite-panel="torcherinoHTML" hidden>
+            <div class="hz-rewrite-panel-head">
+              <div>
+                <div class="hz-rewrite-panel-title">{{.T "system.rewriteRuntime.tab.torcherinoHTML"}}</div>
+                <div class="muted small">{{.T "system.rewriteRuntime.torcherinoHTMLHint"}}</div>
+              </div>
+              <span class="pill {{if .RewriteRuntime.TorcherinoHTML.Enabled}}ok{{else}}err{{end}}" data-hz-rewrite-enabled-pill="torcherinoHTML">{{if .RewriteRuntime.TorcherinoHTML.Enabled}}{{.T "common.enabled"}}{{else}}{{.T "common.disabled"}}{{end}}</span>
+            </div>
+            <div class="hz-metric-grid hz-metric-grid-detail">
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.activeRewrites">{{.RewriteRuntime.TorcherinoHTML.ActiveRewrites}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.reserve"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.reserve">{{.RewriteRuntime.TorcherinoHTML.Reserve}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.headroom"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.headroom">{{.RewriteRuntime.TorcherinoHTML.Headroom}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedLimit"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.bufferedLimit">{{.RewriteRuntime.TorcherinoHTML.BufferedLimit}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamChunk"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.streamChunk">{{.RewriteRuntime.TorcherinoHTML.StreamChunk}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.unknownLength"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.unknownLength">{{.RewriteRuntime.TorcherinoHTML.UnknownLength}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.calibrationSamples"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.calibrationSamples">{{.RewriteRuntime.TorcherinoHTML.CalibrationSamples}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.recentBodyP90"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.recentBodyP90">{{.RewriteRuntime.TorcherinoHTML.RecentBodyP90}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedCostFactor"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.bufferedCostFactor">{{.RewriteRuntime.TorcherinoHTML.BufferedCostFactor}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.usableShare"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.usableShare">{{.RewriteRuntime.TorcherinoHTML.UsableShare}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.bufferedSpeed">{{.RewriteRuntime.TorcherinoHTML.BufferedSpeed}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.streamSpeed">{{.RewriteRuntime.TorcherinoHTML.StreamSpeed}}</code></div></div>
+            </div>
+          </section>
+
+          <section class="hz-rewrite-panel" data-hz-rewrite-panel="torcherinoJSON" hidden>
+            <div class="hz-rewrite-panel-head">
+              <div>
+                <div class="hz-rewrite-panel-title">{{.T "system.rewriteRuntime.tab.torcherinoJSON"}}</div>
+                <div class="muted small">{{.T "system.rewriteRuntime.torcherinoJSONHint"}}</div>
+              </div>
+              <span class="pill {{if .RewriteRuntime.TorcherinoJSON.Enabled}}ok{{else}}err{{end}}" data-hz-rewrite-enabled-pill="torcherinoJSON">{{if .RewriteRuntime.TorcherinoJSON.Enabled}}{{.T "common.enabled"}}{{else}}{{.T "common.disabled"}}{{end}}</span>
+            </div>
+            <div class="hz-metric-grid hz-metric-grid-detail">
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.activeRewrites">{{.RewriteRuntime.TorcherinoJSON.ActiveRewrites}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.reserve"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.reserve">{{.RewriteRuntime.TorcherinoJSON.Reserve}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.headroom"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.headroom">{{.RewriteRuntime.TorcherinoJSON.Headroom}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedLimit"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.bufferedLimit">{{.RewriteRuntime.TorcherinoJSON.BufferedLimit}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamChunk"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.streamChunk">{{.RewriteRuntime.TorcherinoJSON.StreamChunk}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.unknownLength"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.unknownLength">{{.RewriteRuntime.TorcherinoJSON.UnknownLength}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.calibrationSamples"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.calibrationSamples">{{.RewriteRuntime.TorcherinoJSON.CalibrationSamples}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.recentBodyP90"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.recentBodyP90">{{.RewriteRuntime.TorcherinoJSON.RecentBodyP90}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedCostFactor"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.bufferedCostFactor">{{.RewriteRuntime.TorcherinoJSON.BufferedCostFactor}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.usableShare"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.usableShare">{{.RewriteRuntime.TorcherinoJSON.UsableShare}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.bufferedSpeed">{{.RewriteRuntime.TorcherinoJSON.BufferedSpeed}}</code></div></div>
+              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.streamSpeed">{{.RewriteRuntime.TorcherinoJSON.StreamSpeed}}</code></div></div>
+            </div>
+          </section>
         </div>
       </div>
     </div>

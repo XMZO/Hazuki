@@ -395,37 +395,63 @@
     systemAbort = null;
   };
 
-  const updateSystemGitRewriteDom = (info) => {
-    const card = qs("[data-hz-git-rewrite-card]");
-    if (!card) return;
+  const getObjectPath = (obj, path) => {
+    const parts = (path || "").toString().split(".");
+    let cur = obj;
+    for (const part of parts) {
+      const key = (part || "").trim();
+      if (!key || !cur || typeof cur !== "object") return null;
+      cur = cur[key];
+    }
+    return cur;
+  };
 
-    const enabled = !!(info && info.enabled);
-    const enabledEl = qs("[data-hz-git-rewrite-enabled]", card);
-    const disabledEl = qs("[data-hz-git-rewrite-disabled]", card);
-    if (enabledEl) enabledEl.hidden = !enabled;
-    if (disabledEl) disabledEl.hidden = enabled;
-
-    const values = {
-      budgetSource: (info && info.budgetSource) || "-",
-      memoryBudget: (info && info.memoryBudget) || "-",
-      goUsed: (info && info.goUsed) || "-",
-      reserve: (info && info.reserve) || "-",
-      headroom: (info && info.headroom) || "-",
-      bufferedLimit: (info && info.bufferedLimit) || "-",
-      streamChunk: (info && info.streamChunk) || "-",
-      unknownLength: (info && info.unknownLength) || "-",
-    };
-
-    for (const el of qsa("[data-hz-git-rewrite-field]", card)) {
-      const field = (el.getAttribute("data-hz-git-rewrite-field") || "").trim();
-      if (!field) continue;
-      if (Object.prototype.hasOwnProperty.call(values, field)) {
-        el.textContent = values[field];
-      }
+  const setRewriteTabActive = (tab) => {
+    const root = qs("[data-hz-rewrite-tabs]");
+    if (!root) return;
+    const activeTab = (tab || "").trim() || "gitHTML";
+    for (const btn of qsa("[data-hz-rewrite-tab]", root)) {
+      const key = (btn.getAttribute("data-hz-rewrite-tab") || "").trim();
+      btn.classList.toggle("active", key === activeTab);
+    }
+    for (const panel of qsa("[data-hz-rewrite-panel]")) {
+      const key = (panel.getAttribute("data-hz-rewrite-panel") || "").trim();
+      panel.hidden = key !== activeTab;
     }
   };
 
-  const pollSystemGitRewrite = async () => {
+  const getRewriteTab = () => {
+    const root = qs("[data-hz-rewrite-tabs]");
+    if (!root) return "gitHTML";
+    const active = qs("[data-hz-rewrite-tab].active", root);
+    const key = active ? (active.getAttribute("data-hz-rewrite-tab") || "").trim() : "";
+    return key || "gitHTML";
+  };
+
+  const updateSystemRewriteRuntimeDom = (info) => {
+    const card = qs("[data-hz-rewrite-runtime-card]");
+    if (!card) return;
+
+    for (const el of qsa("[data-hz-rewrite-field]", card)) {
+      const path = (el.getAttribute("data-hz-rewrite-field") || "").trim();
+      if (!path) continue;
+      const value = getObjectPath(info, path);
+      el.textContent = typeof value === "string" && value.trim() !== "" ? value : "-";
+    }
+
+    for (const pill of qsa("[data-hz-rewrite-enabled-pill]", card)) {
+      const key = (pill.getAttribute("data-hz-rewrite-enabled-pill") || "").trim();
+      if (!key) continue;
+      const enabled = !!getObjectPath(info, key + ".enabled");
+      pill.classList.toggle("ok", enabled);
+      pill.classList.toggle("err", !enabled);
+      pill.textContent = enabled
+        ? tKey("common.enabled", "Enabled")
+        : tKey("common.disabled", "Disabled");
+    }
+  };
+
+  const pollSystemRewriteRuntime = async () => {
     const page = (document.body && document.body.getAttribute("data-page")) || "";
     if (page !== "system") {
       stopSystemPage();
@@ -453,7 +479,7 @@
       const opts = { method: "GET", headers: { Accept: "application/json" }, credentials: "same-origin" };
       if (signal) opts.signal = signal;
 
-      const resp = await fetch("/_hazuki/system/git-rewrite", opts);
+      const resp = await fetch("/_hazuki/system/rewrite-runtime", opts);
       if (mySeq !== systemSeq) return;
 
       const ct = (resp.headers.get("content-type") || "").toLowerCase();
@@ -464,7 +490,7 @@
       const payload = await resp.json();
       if (mySeq !== systemSeq) return;
 
-      updateSystemGitRewriteDom(payload && payload.gitHTMLRewrite ? payload.gitHTMLRewrite : null);
+      updateSystemRewriteRuntimeDom(payload && payload.rewriteRuntime ? payload.rewriteRuntime : null);
     } catch {
       if (systemAbort && systemAbort.signal && systemAbort.signal.aborted) {
         return;
@@ -479,9 +505,24 @@
       return;
     }
 
+    const root = qs("[data-hz-rewrite-tabs]");
+    if (root) {
+      for (const btn of qsa("[data-hz-rewrite-tab]", root)) {
+        if (btn.__hzRewriteBound) continue;
+        btn.__hzRewriteBound = true;
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          const key = (btn.getAttribute("data-hz-rewrite-tab") || "").trim();
+          if (!key) return;
+          setRewriteTabActive(key);
+        });
+      }
+      setRewriteTabActive(getRewriteTab());
+    }
+
     if (systemTimer) return;
-    pollSystemGitRewrite();
-    systemTimer = setInterval(pollSystemGitRewrite, 5000);
+    pollSystemRewriteRuntime();
+    systemTimer = setInterval(pollSystemRewriteRuntime, 5000);
   };
 
   const pad2 = (n) => String(n).padStart(2, "0");

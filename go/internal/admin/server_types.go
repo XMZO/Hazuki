@@ -258,18 +258,62 @@ type systemData struct {
 	Redis redisStatus
 
 	GitHTMLRewrite systemGitHTMLRewriteData
+	RewriteRuntime systemRewriteRuntimeData
 }
 
 type systemGitHTMLRewriteData struct {
-	Enabled       bool   `json:"enabled"`
-	BudgetSource  string `json:"budgetSource"`
-	MemoryBudget  string `json:"memoryBudget"`
-	GoUsed        string `json:"goUsed"`
-	Reserve       string `json:"reserve"`
-	Headroom      string `json:"headroom"`
-	BufferedLimit string `json:"bufferedLimit"`
-	StreamChunk   string `json:"streamChunk"`
-	UnknownLength string `json:"unknownLength"`
+	Enabled            bool   `json:"enabled"`
+	BudgetSource       string `json:"budgetSource"`
+	MemoryBudget       string `json:"memoryBudget"`
+	GoUsed             string `json:"goUsed"`
+	EffectiveUsed      string `json:"effectiveUsed"`
+	CgroupCurrent      string `json:"cgroupCurrent"`
+	CgroupEvents       string `json:"cgroupEvents"`
+	Reserve            string `json:"reserve"`
+	Headroom           string `json:"headroom"`
+	BufferedLimit      string `json:"bufferedLimit"`
+	StreamChunk        string `json:"streamChunk"`
+	UnknownLength      string `json:"unknownLength"`
+	ActiveRewrites     string `json:"activeRewrites"`
+	CalibrationSamples string `json:"calibrationSamples"`
+	RecentHTMLP90      string `json:"recentHTMLP90"`
+	BufferedCostFactor string `json:"bufferedCostFactor"`
+	UsableShare        string `json:"usableShare"`
+	BufferedSpeed      string `json:"bufferedSpeed"`
+	StreamSpeed        string `json:"streamSpeed"`
+}
+
+type systemRewriteRuntimeData struct {
+	Shared         systemRewriteRuntimeSharedData `json:"shared"`
+	GitHTML        systemRewriteRuntimeTunerData  `json:"gitHTML"`
+	TorcherinoHTML systemRewriteRuntimeTunerData  `json:"torcherinoHTML"`
+	TorcherinoJSON systemRewriteRuntimeTunerData  `json:"torcherinoJSON"`
+}
+
+type systemRewriteRuntimeSharedData struct {
+	BudgetSource   string `json:"budgetSource"`
+	MemoryBudget   string `json:"memoryBudget"`
+	GoUsed         string `json:"goUsed"`
+	EffectiveUsed  string `json:"effectiveUsed"`
+	CgroupCurrent  string `json:"cgroupCurrent"`
+	CgroupEvents   string `json:"cgroupEvents"`
+	ActiveRewrites string `json:"activeRewrites"`
+}
+
+type systemRewriteRuntimeTunerData struct {
+	Enabled            bool   `json:"enabled"`
+	ActiveRewrites     string `json:"activeRewrites"`
+	Reserve            string `json:"reserve"`
+	Headroom           string `json:"headroom"`
+	BufferedLimit      string `json:"bufferedLimit"`
+	StreamChunk        string `json:"streamChunk"`
+	UnknownLength      string `json:"unknownLength"`
+	CalibrationSamples string `json:"calibrationSamples"`
+	RecentBodyP90      string `json:"recentBodyP90"`
+	BufferedCostFactor string `json:"bufferedCostFactor"`
+	UsableShare        string `json:"usableShare"`
+	BufferedSpeed      string `json:"bufferedSpeed"`
+	StreamSpeed        string `json:"streamSpeed"`
 }
 
 type redisCacheEntry struct {

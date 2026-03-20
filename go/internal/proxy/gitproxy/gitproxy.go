@@ -8,39 +8,55 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"runtime/debug"
-	"runtime/metrics"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"hazuki-go/internal/model"
+	"hazuki-go/internal/proxy/rewritebudget"
 	"hazuki-go/internal/proxy/upstreamhttp"
 )
 
 const (
-	defaultBufferedRewriteBytes       = 1 << 20   // 1 MiB
-	minBufferedRewriteBytes           = 128 << 10 // 128 KiB
-	maxBufferedRewriteBytes           = 4 << 20   // 4 MiB
-	minStreamRewriteChunkBytes        = 32 << 10  // 32 KiB
-	maxStreamRewriteChunkBytes        = 128 << 10 // 128 KiB
-	minRewriteReserveBytes            = 32 << 20  // 32 MiB
-	maxRewriteReserveBytes            = 128 << 20 // 128 MiB
-	rewriteHeadroomDivisor      int64 = 32
-	maxReasonableMemoryBytes    int64 = 1 << 60
-	maxInt64                    int64 = int64(^uint64(0) >> 1)
+	defaultBufferedRewriteBytes         = 1 << 20   // 1 MiB
+	minBufferedRewriteBytes             = 128 << 10 // 128 KiB
+	maxBufferedRewriteBytes             = 4 << 20   // 4 MiB
+	minStreamRewriteChunkBytes          = 32 << 10  // 32 KiB
+	maxStreamRewriteChunkBytes          = 128 << 10 // 128 KiB
+	minRewriteReserveBytes              = 32 << 20  // 32 MiB
+	maxRewriteReserveBytes              = 128 << 20 // 128 MiB
+	bufferedRewriteFixedCostBytes       = 384 << 10 // 384 KiB
+	streamRewriteFixedCostBytes         = 64 << 10  // 64 KiB
+	maxStreamWorkspaceBytes       int64 = 320 << 10 // 320 KiB
+	streamWorkspaceDivisor        int64 = 12
+	streamWorkspaceChunkFactor    int64 = 2
+	maxInt64                      int64 = int64(^uint64(0) >> 1)
+
+	defaultBufferedRewriteCostMultiplier = 3.5
+	minBufferedRewriteCostMultiplier     = 2.75
+	maxBufferedRewriteCostMultiplier     = 4.75
+
+	defaultBufferedRewriteExpansionRatio = 1.0
+	defaultBufferedRewritePeakP95        = 3.55
+	defaultBufferedRewritePeakP99        = 3.95
+	defaultBufferedRewriteNsPerByte      = 1.15
+	defaultStreamRewriteNsPerByte        = 1.42
+
+	defaultRewriteUsableShare = 0.70
+	minRewriteUsableShare     = 0.58
+	maxRewriteUsableShare     = 0.82
+
+	htmlRewriteConfidenceTargetSamples = 24.0
+	maxObservedHTMLReserveFactor       = 16.0
+	htmlRewriteHysteresisMargin        = 0.08
 )
 
 var (
-	goMemorySamples = []metrics.Sample{
-		{Name: "/memory/classes/total:bytes"},
-		{Name: "/memory/classes/heap/released:bytes"},
-	}
-	detectedStaticMemoryBudgetBytes = sync.OnceValue(detectStaticMemoryBudgetBytes)
-	htmlRewritePlanner              = chooseHTMLRewritePlan
+	htmlRewritePlanner     = chooseHTMLRewritePlan
+	htmlRewriteAutoTuner   = newHTMLRewriteAutoTuner()
+	activeHTMLRewriteCount atomic.Int64
 )
 
 type CorsOrigins struct {
@@ -85,11 +101,286 @@ type HTMLRewriteStatus struct {
 	BudgetSource         string
 	MemoryBudgetBytes    int64
 	GoMemoryUsedBytes    int64
+	EffectiveUsedBytes   int64
+	CgroupCurrentBytes   int64
 	RewriteReserveBytes  int64
 	HeadroomBytes        int64
 	BufferedLimitBytes   int64
 	StreamChunkBytes     int
 	UnknownLengthStreams bool
+
+	ActiveRewrites                 int64
+	BufferedCostMultiplierMilli    int
+	UsableShareMilli               int
+	RecentHTMLP90Bytes             int64
+	BufferedSamples                int64
+	StreamingSamples               int64
+	BufferedThroughputBytesPerSec  int64
+	StreamingThroughputBytesPerSec int64
+	CgroupHighEvents               int64
+	CgroupMaxEvents                int64
+	CgroupOOMEvents                int64
+	CgroupOOMKillEvents            int64
+}
+
+type htmlRewriteTuningSnapshot struct {
+	BufferedExpansionRatio float64
+	BufferedPeakP95        float64
+	BufferedPeakP99        float64
+	BufferedNsPerByte      float64
+	StreamNsPerByte        float64
+	KnownHTMLMeanBytes     float64
+	KnownHTMLP90Bytes      float64
+	BufferedSamples        int64
+	StreamingSamples       int64
+}
+
+type htmlRewriteAutoTunerState struct {
+	BufferedExpansionRatio float64
+	BufferedPeakP95        float64
+	BufferedPeakP99        float64
+	BufferedNsPerByte      float64
+	StreamNsPerByte        float64
+	KnownHTMLMeanBytes     float64
+	KnownHTMLP90Bytes      float64
+	BufferedSamples        int64
+	StreamingSamples       int64
+	DecisionSeenMask       uint32
+	DecisionBufferedMask   uint32
+}
+
+type htmlRewriteRuntimeTuner struct {
+	mu    sync.Mutex
+	state htmlRewriteAutoTunerState
+}
+
+func newHTMLRewriteAutoTuner() *htmlRewriteRuntimeTuner {
+	return &htmlRewriteRuntimeTuner{
+		state: htmlRewriteAutoTunerState{
+			BufferedExpansionRatio: defaultBufferedRewriteExpansionRatio,
+			BufferedPeakP95:        defaultBufferedRewritePeakP95,
+			BufferedPeakP99:        defaultBufferedRewritePeakP99,
+			BufferedNsPerByte:      defaultBufferedRewriteNsPerByte,
+			StreamNsPerByte:        defaultStreamRewriteNsPerByte,
+		},
+	}
+}
+
+func defaultHTMLRewriteTuningSnapshot() htmlRewriteTuningSnapshot {
+	return htmlRewriteTuningSnapshot{
+		BufferedExpansionRatio: defaultBufferedRewriteExpansionRatio,
+		BufferedPeakP95:        defaultBufferedRewritePeakP95,
+		BufferedPeakP99:        defaultBufferedRewritePeakP99,
+		BufferedNsPerByte:      defaultBufferedRewriteNsPerByte,
+		StreamNsPerByte:        defaultStreamRewriteNsPerByte,
+	}
+}
+
+func (t *htmlRewriteRuntimeTuner) snapshot() htmlRewriteTuningSnapshot {
+	if t == nil {
+		return defaultHTMLRewriteTuningSnapshot()
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	s := t.state
+	return htmlRewriteTuningSnapshot{
+		BufferedExpansionRatio: positiveOrDefaultFloat64(s.BufferedExpansionRatio, defaultBufferedRewriteExpansionRatio),
+		BufferedPeakP95:        positiveOrDefaultFloat64(s.BufferedPeakP95, defaultBufferedRewritePeakP95),
+		BufferedPeakP99:        positiveOrDefaultFloat64(s.BufferedPeakP99, defaultBufferedRewritePeakP99),
+		BufferedNsPerByte:      positiveOrDefaultFloat64(s.BufferedNsPerByte, defaultBufferedRewriteNsPerByte),
+		StreamNsPerByte:        positiveOrDefaultFloat64(s.StreamNsPerByte, defaultStreamRewriteNsPerByte),
+		KnownHTMLMeanBytes:     maxFloat64(s.KnownHTMLMeanBytes, 0),
+		KnownHTMLP90Bytes:      maxFloat64(s.KnownHTMLP90Bytes, 0),
+		BufferedSamples:        s.BufferedSamples,
+		StreamingSamples:       s.StreamingSamples,
+	}
+}
+
+func (t *htmlRewriteRuntimeTuner) choosePlan(memory rewritebudget.MemoryStatus, contentLength, activeRewrites int64) htmlRewritePlan {
+	snapshot := t.snapshot()
+	plan := deriveHTMLRewritePlanWithSnapshot(memory, contentLength, activeRewrites, snapshot)
+	if t == nil {
+		return plan
+	}
+	return t.applyDecisionHysteresis(plan, contentLength, snapshot)
+}
+
+func (t *htmlRewriteRuntimeTuner) applyDecisionHysteresis(plan htmlRewritePlan, contentLength int64, snapshot htmlRewriteTuningSnapshot) htmlRewritePlan {
+	if t == nil || contentLength < 0 || plan.BufferedLimit <= 0 {
+		return plan
+	}
+
+	bucket := htmlRewriteDecisionBucket(contentLength)
+	enterLimit := clampInt64(
+		clampFloat64ToInt64(float64(plan.BufferedLimit)*(1.0-htmlRewriteHysteresisMargin)),
+		minBufferedRewriteBytes,
+		maxBufferedRewriteBytes,
+	)
+	exitLimit := clampInt64(
+		clampFloat64ToInt64(float64(plan.BufferedLimit)*(1.0+htmlRewriteHysteresisMargin)),
+		minBufferedRewriteBytes,
+		maxBufferedRewriteBytes,
+	)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	mask := uint32(1 << bucket)
+	seen := (t.state.DecisionSeenMask & mask) != 0
+	stickyBuffered := (t.state.DecisionBufferedMask & mask) != 0
+
+	switch {
+	case !seen:
+		stickyBuffered = plan.Buffered
+	case stickyBuffered:
+		if contentLength <= exitLimit {
+			plan.Buffered = true
+		}
+		stickyBuffered = plan.Buffered
+	default:
+		if contentLength >= enterLimit {
+			plan.Buffered = false
+		}
+		if contentLength < enterLimit {
+			stickyBuffered = plan.Buffered
+		}
+	}
+
+	t.state.DecisionSeenMask |= mask
+	if stickyBuffered {
+		t.state.DecisionBufferedMask |= mask
+	} else {
+		t.state.DecisionBufferedMask &^= mask
+	}
+
+	return plan
+}
+
+func (t *htmlRewriteRuntimeTuner) observeBuffered(inputBytes, outputBytes int64, duration time.Duration, peakExtraBytes int64) {
+	if t == nil || inputBytes <= 0 {
+		return
+	}
+
+	alpha := htmlRewriteSampleAlpha(inputBytes)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.state.BufferedSamples++
+	t.observeKnownHTMLLocked(float64(inputBytes), alpha)
+
+	if outputBytes > 0 {
+		expansion := float64(outputBytes) / float64(inputBytes)
+		t.state.BufferedExpansionRatio = ewmaFloat64(
+			positiveOrDefaultFloat64(t.state.BufferedExpansionRatio, defaultBufferedRewriteExpansionRatio),
+			expansion,
+			alpha,
+		)
+	}
+
+	if duration > 0 {
+		nsPerByte := float64(duration.Nanoseconds()) / float64(inputBytes)
+		t.state.BufferedNsPerByte = ewmaFloat64(
+			positiveOrDefaultFloat64(t.state.BufferedNsPerByte, defaultBufferedRewriteNsPerByte),
+			nsPerByte,
+			alpha,
+		)
+	}
+
+	if peakExtraBytes > 0 {
+		peakMultiplier := float64(peakExtraBytes) / float64(inputBytes)
+		t.state.BufferedPeakP95 = updateUpperTailEstimate(
+			positiveOrDefaultFloat64(t.state.BufferedPeakP95, defaultBufferedRewritePeakP95),
+			peakMultiplier,
+			alpha,
+			0.95,
+		)
+		t.state.BufferedPeakP99 = updateUpperTailEstimate(
+			positiveOrDefaultFloat64(t.state.BufferedPeakP99, defaultBufferedRewritePeakP99),
+			peakMultiplier,
+			alpha*0.75,
+			0.99,
+		)
+	}
+}
+
+func (t *htmlRewriteRuntimeTuner) observeStreaming(inputBytes int64, duration time.Duration) {
+	if t == nil || inputBytes <= 0 {
+		return
+	}
+
+	alpha := htmlRewriteSampleAlpha(inputBytes)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.state.StreamingSamples++
+	t.observeKnownHTMLLocked(float64(inputBytes), alpha)
+
+	if duration > 0 {
+		nsPerByte := float64(duration.Nanoseconds()) / float64(inputBytes)
+		t.state.StreamNsPerByte = ewmaFloat64(
+			positiveOrDefaultFloat64(t.state.StreamNsPerByte, defaultStreamRewriteNsPerByte),
+			nsPerByte,
+			alpha,
+		)
+	}
+}
+
+func (t *htmlRewriteRuntimeTuner) observeKnownHTMLLocked(sampleBytes, alpha float64) {
+	if sampleBytes <= 0 {
+		return
+	}
+	if t.state.KnownHTMLMeanBytes <= 0 {
+		t.state.KnownHTMLMeanBytes = sampleBytes
+	} else {
+		t.state.KnownHTMLMeanBytes = ewmaFloat64(t.state.KnownHTMLMeanBytes, sampleBytes, alpha)
+	}
+	t.state.KnownHTMLP90Bytes = updateUpperTailEstimate(
+		t.state.KnownHTMLP90Bytes,
+		sampleBytes,
+		alpha,
+		0.90,
+	)
+}
+
+func htmlRewriteSampleAlpha(inputBytes int64) float64 {
+	if inputBytes <= 0 {
+		return 0.10
+	}
+	alpha := 0.08 + 0.17*(clampFloat64(float64(inputBytes)/float64(2<<20), 0, 1))
+	return clampFloat64(alpha, 0.08, 0.25)
+}
+
+func ewmaFloat64(prev, sample, alpha float64) float64 {
+	if sample <= 0 {
+		return prev
+	}
+	if prev <= 0 {
+		return sample
+	}
+	if alpha <= 0 {
+		return prev
+	}
+	if alpha >= 1 {
+		return sample
+	}
+	return prev + alpha*(sample-prev)
+}
+
+func updateUpperTailEstimate(prev, sample, alpha, quantile float64) float64 {
+	if sample <= 0 {
+		return prev
+	}
+	if prev <= 0 {
+		return sample
+	}
+	if sample >= prev {
+		return prev + alpha*quantile*(sample-prev)
+	}
+	return prev + alpha*(1-quantile)*(sample-prev)
 }
 
 func BuildRuntimeConfig(cfg model.AppConfig) (RuntimeConfig, error) {
@@ -320,11 +611,10 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 		}
 	}
 
-	// HTML rewrite mode is chosen from current memory headroom so small hosts can
-	// automatically stream under pressure while larger/idle hosts keep the
-	// cheaper buffered path.
+	// HTML rewrite mode is chosen from a simple memory cost model so small hosts
+	// can stream under pressure while larger or quieter hosts keep the cheaper
+	// buffered path.
 	shouldRewrite := shouldRewriteHTML(effectiveContentType)
-	rewritePlan := htmlRewritePlanner(resp.ContentLength)
 
 	cacheControl := computeCacheControl(runtime.DisableCache, effectiveContentType, runtime.CacheControl, runtime.CacheControlMedia, runtime.CacheControlText)
 
@@ -342,16 +632,39 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 	}
 
 	if shouldRewrite {
+		finishRewrite := beginHTMLRewrite()
+		defer finishRewrite()
+
+		rewritePlan := htmlRewritePlanner(resp.ContentLength)
 		if rewritePlan.Buffered {
+			startedAt := time.Now()
+			beforeUsed := rewritebudget.CurrentMemoryStatus().GoMemoryUsedBytes
 			raw, err := io.ReadAll(resp.Body)
 			if err != nil {
 				return
 			}
+			afterReadUsed := rewritebudget.CurrentMemoryStatus().GoMemoryUsedBytes
 			rewritten := applyReplacements(string(raw), upstreamDomain, originalHost, runtime.ReplaceDict)
-			_, _ = io.WriteString(w, rewritten)
+			afterRewriteUsed := rewritebudget.CurrentMemoryStatus().GoMemoryUsedBytes
+			if _, err := io.WriteString(w, rewritten); err == nil {
+				htmlRewriteAutoTuner.observeBuffered(
+					int64(len(raw)),
+					int64(len(rewritten)),
+					time.Since(startedAt),
+					maxInt64Value(
+						positiveDeltaInt64(afterReadUsed, beforeUsed),
+						positiveDeltaInt64(afterRewriteUsed, beforeUsed),
+					),
+				)
+			}
 			return
 		}
-		_ = streamApplyReplacementsWithChunkSize(w, resp.Body, upstreamDomain, originalHost, runtime.ReplaceDict, rewritePlan.StreamChunkBytes)
+		startedAt := time.Now()
+		countedBody := &countingReader{src: resp.Body}
+		countedWriter := &countingWriter{dst: w}
+		if err := streamApplyReplacementsWithChunkSize(countedWriter, countedBody, upstreamDomain, originalHost, runtime.ReplaceDict, rewritePlan.StreamChunkBytes); err == nil {
+			htmlRewriteAutoTuner.observeStreaming(countedBody.n, time.Since(startedAt))
+		}
 		return
 	}
 
@@ -654,59 +967,124 @@ func shouldRewriteHTML(contentType string) bool {
 }
 
 func chooseHTMLRewritePlan(contentLength int64) htmlRewritePlan {
-	return deriveHTMLRewritePlan(currentMemoryBudgetBytes(), currentGoMemoryUsedBytes(), contentLength)
+	return htmlRewriteAutoTuner.choosePlan(
+		rewritebudget.CurrentMemoryStatus(),
+		contentLength,
+		currentHTMLRewriteConcurrency(),
+	)
 }
 
 func CurrentHTMLRewriteStatus() HTMLRewriteStatus {
-	memoryBudgetBytes, budgetSource := currentMemoryBudgetStatus()
-	memoryUsedBytes := currentGoMemoryUsedBytes()
-	plan := deriveHTMLRewritePlan(memoryBudgetBytes, memoryUsedBytes, -1)
+	memory := rewritebudget.CurrentMemoryStatus()
+	totalActiveRewrites := rewritebudget.CurrentActiveCount()
+	snapshot := htmlRewriteAutoTuner.snapshot()
+	plan := deriveHTMLRewritePlanWithSnapshot(
+		memory,
+		-1,
+		maxInt64Value(totalActiveRewrites, 1),
+		snapshot,
+	)
 
 	reserveBytes := int64(0)
 	headroomBytes := int64(0)
-	if memoryBudgetBytes > 0 {
-		reserveBytes = computeRewriteReserveBytes(memoryBudgetBytes)
-		headroomBytes = memoryBudgetBytes - memoryUsedBytes - reserveBytes
+	usableShare := defaultRewriteUsableShare
+	if memory.MemoryBudgetBytes > 0 {
+		reserveBytes = computeRewriteReserveBytes(memory.MemoryBudgetBytes, snapshot)
+		headroomBytes = memory.MemoryBudgetBytes - memory.EffectiveUsedBytes - reserveBytes
 		if headroomBytes < 0 {
 			headroomBytes = 0
 		}
+		usableShare = computeRewriteUsableShare(memory, headroomBytes, maxInt64Value(totalActiveRewrites, 1), snapshot)
 	}
 
 	return HTMLRewriteStatus{
-		BudgetSource:         budgetSource,
-		MemoryBudgetBytes:    memoryBudgetBytes,
-		GoMemoryUsedBytes:    memoryUsedBytes,
+		BudgetSource:         memory.BudgetSource,
+		MemoryBudgetBytes:    memory.MemoryBudgetBytes,
+		GoMemoryUsedBytes:    memory.GoMemoryUsedBytes,
+		EffectiveUsedBytes:   memory.EffectiveUsedBytes,
+		CgroupCurrentBytes:   memory.CgroupCurrentBytes,
 		RewriteReserveBytes:  reserveBytes,
 		HeadroomBytes:        headroomBytes,
 		BufferedLimitBytes:   plan.BufferedLimit,
 		StreamChunkBytes:     plan.StreamChunkBytes,
 		UnknownLengthStreams: true,
+
+		ActiveRewrites:                 totalActiveRewrites,
+		BufferedCostMultiplierMilli:    int(computeBufferedRewriteCostMultiplier(snapshot) * 1000),
+		UsableShareMilli:               int(usableShare * 1000),
+		RecentHTMLP90Bytes:             clampFloat64ToInt64(snapshot.KnownHTMLP90Bytes),
+		BufferedSamples:                snapshot.BufferedSamples,
+		StreamingSamples:               snapshot.StreamingSamples,
+		BufferedThroughputBytesPerSec:  nsPerByteToBytesPerSecond(snapshot.BufferedNsPerByte),
+		StreamingThroughputBytesPerSec: nsPerByteToBytesPerSecond(snapshot.StreamNsPerByte),
+		CgroupHighEvents:               memory.CgroupHighEvents,
+		CgroupMaxEvents:                memory.CgroupMaxEvents,
+		CgroupOOMEvents:                memory.CgroupOOMEvents,
+		CgroupOOMKillEvents:            memory.CgroupOOMKillEvents,
 	}
 }
 
 func deriveHTMLRewritePlan(memoryBudgetBytes, memoryUsedBytes, contentLength int64) htmlRewritePlan {
+	return deriveHTMLRewritePlanWithConcurrency(memoryBudgetBytes, memoryUsedBytes, contentLength, 1)
+}
+
+func deriveHTMLRewritePlanWithConcurrency(memoryBudgetBytes, memoryUsedBytes, contentLength, activeRewrites int64) htmlRewritePlan {
+	return deriveHTMLRewritePlanWithSnapshot(
+		rewritebudget.MemoryStatus{
+			MemoryBudgetBytes:  memoryBudgetBytes,
+			GoMemoryUsedBytes:  memoryUsedBytes,
+			EffectiveUsedBytes: memoryUsedBytes,
+		},
+		contentLength,
+		activeRewrites,
+		defaultHTMLRewriteTuningSnapshot(),
+	)
+}
+
+func deriveHTMLRewritePlanWithSnapshot(memory rewritebudget.MemoryStatus, contentLength, activeRewrites int64, snapshot htmlRewriteTuningSnapshot) htmlRewritePlan {
 	plan := htmlRewritePlan{
 		BufferedLimit:    defaultBufferedRewriteBytes,
 		StreamChunkBytes: maxStreamRewriteChunkBytes,
 	}
+	usableBudget := int64(-1)
+	bufferedCostMultiplier := computeBufferedRewriteCostMultiplier(snapshot)
 
-	if memoryBudgetBytes > 0 && memoryUsedBytes >= 0 && memoryBudgetBytes > memoryUsedBytes {
-		headroom := memoryBudgetBytes - memoryUsedBytes - computeRewriteReserveBytes(memoryBudgetBytes)
+	if memory.MemoryBudgetBytes > 0 && memory.EffectiveUsedBytes >= 0 && memory.MemoryBudgetBytes > memory.EffectiveUsedBytes {
+		headroom := memory.MemoryBudgetBytes - memory.EffectiveUsedBytes - computeRewriteReserveBytes(memory.MemoryBudgetBytes, snapshot)
 		if headroom <= 0 {
+			usableBudget = 0
 			plan.BufferedLimit = 0
 			plan.StreamChunkBytes = minStreamRewriteChunkBytes
 		} else {
-			plan.BufferedLimit = clampInt64(headroom/rewriteHeadroomDivisor, minBufferedRewriteBytes, maxBufferedRewriteBytes)
-			plan.StreamChunkBytes = clampInt(int(plan.BufferedLimit/8), minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes)
+			usableShare := computeRewriteUsableShare(memory, headroom, activeRewrites, snapshot)
+			usableBudget = computeRewriteUsableBudgetBytes(headroom, activeRewrites, usableShare)
+			plan.BufferedLimit = clampInt64(
+				maxBufferedContentLengthForBudget(usableBudget, bufferedCostMultiplier),
+				minBufferedRewriteBytes,
+				maxBufferedRewriteBytes,
+			)
+			plan.StreamChunkBytes = deriveStreamRewriteChunkBytes(usableBudget, snapshot)
 		}
 	}
 
 	plan.Buffered = contentLength >= 0 && plan.BufferedLimit > 0 && contentLength <= plan.BufferedLimit
+	if plan.Buffered && usableBudget >= 0 {
+		decisionBudget := clampFloat64ToInt64(
+			float64(usableBudget) * computeBufferedDecisionFraction(snapshot),
+		)
+		plan.Buffered = estimatedBufferedRewriteCostBytes(contentLength, bufferedCostMultiplier) <= maxInt64Value(decisionBudget, 0)
+	}
 	return plan
 }
 
-func computeRewriteReserveBytes(memoryBudgetBytes int64) int64 {
+func computeRewriteReserveBytes(memoryBudgetBytes int64, snapshot htmlRewriteTuningSnapshot) int64 {
 	reserve := memoryBudgetBytes / 8
+	if snapshot.KnownHTMLP90Bytes > 0 {
+		observedReserve := clampFloat64ToInt64(snapshot.KnownHTMLP90Bytes * maxObservedHTMLReserveFactor)
+		if observedReserve > reserve {
+			reserve = observedReserve
+		}
+	}
 	if reserve < minRewriteReserveBytes {
 		return minRewriteReserveBytes
 	}
@@ -716,97 +1094,241 @@ func computeRewriteReserveBytes(memoryBudgetBytes int64) int64 {
 	return reserve
 }
 
-func currentMemoryBudgetBytes() int64 {
-	limit, _ := currentMemoryBudgetStatus()
-	return limit
+func computeRewriteUsableBudgetBytes(headroomBytes, activeRewrites int64, usableShare float64) int64 {
+	if headroomBytes <= 0 {
+		return 0
+	}
+	if activeRewrites < 1 {
+		activeRewrites = 1
+	}
+	perRewriteBudget := headroomBytes / activeRewrites
+	if perRewriteBudget <= 0 {
+		return 0
+	}
+	return clampFloat64ToInt64(float64(perRewriteBudget) * clampFloat64(usableShare, minRewriteUsableShare, maxRewriteUsableShare))
 }
 
-func currentMemoryBudgetStatus() (int64, string) {
-	if limit := debug.SetMemoryLimit(-1); isUsableMemoryBudget(limit) {
-		return limit, "gomemlimit"
-	}
-	if limit := detectedStaticMemoryBudgetBytes(); isUsableMemoryBudget(limit) {
-		return limit, "cgroup"
-	}
-	if available := readMemAvailableBytes("/proc/meminfo"); isUsableMemoryBudget(available) {
-		return available, "memavailable"
-	}
-	return 0, "default"
-}
+func computeRewriteUsableShare(memory rewritebudget.MemoryStatus, headroomBytes, activeRewrites int64, snapshot htmlRewriteTuningSnapshot) float64 {
+	share := defaultRewriteUsableShare
+	confidence := htmlRewriteCalibrationConfidence(snapshot)
 
-func detectStaticMemoryBudgetBytes() int64 {
-	for _, path := range []string{
-		"/sys/fs/cgroup/memory.max",
-		"/sys/fs/cgroup/memory/memory.limit_in_bytes",
-	} {
-		if limit := readCgroupMemoryLimitBytes(path); isUsableMemoryBudget(limit) {
-			return limit
+	if memory.MemoryBudgetBytes > 0 {
+		headroomRatio := float64(headroomBytes) / float64(memory.MemoryBudgetBytes)
+		if headroomRatio < 0.30 {
+			share -= (0.30 - headroomRatio) * 0.35
+		} else if headroomRatio > 0.55 {
+			share += (headroomRatio - 0.55) * 0.08
 		}
 	}
-	return 0
+
+	if memory.MemoryBudgetBytes > 0 && memory.CgroupCurrentBytes > 0 {
+		cgroupRatio := float64(memory.CgroupCurrentBytes) / float64(memory.MemoryBudgetBytes)
+		if cgroupRatio > 0.78 {
+			share -= clampFloat64((cgroupRatio-0.78)*0.40, 0, 0.10)
+		}
+		if cgroupRatio > 0.90 {
+			share -= clampFloat64((cgroupRatio-0.90)*0.80, 0, 0.08)
+		}
+	}
+
+	if memory.CgroupHighEvents > 0 {
+		share -= clampFloat64(0.01*float64(memory.CgroupHighEvents), 0, 0.04)
+	}
+	if memory.CgroupMaxEvents > 0 {
+		share -= clampFloat64(0.02*float64(memory.CgroupMaxEvents), 0, 0.06)
+	}
+	if memory.CgroupOOMEvents > 0 || memory.CgroupOOMKillEvents > 0 {
+		share -= 0.12
+	}
+
+	speedGain := bufferedSpeedGainRatio(snapshot)
+	share += confidence * clampFloat64(speedGain*0.18, 0, 0.06)
+
+	if activeRewrites > 4 {
+		share -= clampFloat64(float64(activeRewrites-4)*0.01, 0, 0.08)
+	}
+
+	return clampFloat64(share, minRewriteUsableShare, maxRewriteUsableShare)
 }
 
-func currentGoMemoryUsedBytes() int64 {
-	samples := make([]metrics.Sample, len(goMemorySamples))
-	copy(samples, goMemorySamples)
-	metrics.Read(samples)
-	if len(samples) != 2 {
-		return 0
+func estimatedBufferedRewriteCostBytes(contentLength int64, costMultiplier float64) int64 {
+	if contentLength <= 0 {
+		return bufferedRewriteFixedCostBytes
 	}
-	if samples[0].Value.Kind() != metrics.KindUint64 || samples[1].Value.Kind() != metrics.KindUint64 {
-		return 0
+	extra := clampFloat64ToInt64(float64(contentLength) * clampFloat64(costMultiplier, minBufferedRewriteCostMultiplier, maxBufferedRewriteCostMultiplier))
+	if extra >= maxInt64-bufferedRewriteFixedCostBytes {
+		return maxInt64
 	}
-	total := samples[0].Value.Uint64()
-	released := samples[1].Value.Uint64()
-	if total < released || total > uint64(maxInt64) {
-		return 0
-	}
-	return int64(total - released)
+	return bufferedRewriteFixedCostBytes + extra
 }
 
-func readCgroupMemoryLimitBytes(path string) int64 {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return 0
+func computeBufferedRewriteCostMultiplier(snapshot htmlRewriteTuningSnapshot) float64 {
+	structural := 2.25 + clampFloat64(snapshot.BufferedExpansionRatio, 0.85, 1.50)
+	observed := maxFloat64(
+		snapshot.BufferedPeakP95*1.01,
+		snapshot.BufferedPeakP99*0.99,
+	)
+	if snapshot.BufferedSamples < 4 {
+		observed = maxFloat64(observed, defaultBufferedRewriteCostMultiplier)
 	}
-	value := strings.TrimSpace(string(raw))
-	if value == "" || strings.EqualFold(value, "max") {
-		return 0
-	}
-	limit, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return limit
+	return clampFloat64(maxFloat64(structural, observed), minBufferedRewriteCostMultiplier, maxBufferedRewriteCostMultiplier)
 }
 
-func readMemAvailableBytes(path string) int64 {
-	raw, err := os.ReadFile(path)
-	if err != nil {
+func maxBufferedContentLengthForBudget(usableBudgetBytes int64, costMultiplier float64) int64 {
+	if usableBudgetBytes <= bufferedRewriteFixedCostBytes {
 		return 0
 	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if !strings.HasPrefix(line, "MemAvailable:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0
-		}
-		value, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			return 0
-		}
-		if value > maxInt64/1024 {
-			return 0
-		}
-		return value * 1024
-	}
-	return 0
+	return clampFloat64ToInt64(
+		float64(usableBudgetBytes-bufferedRewriteFixedCostBytes) / clampFloat64(costMultiplier, minBufferedRewriteCostMultiplier, maxBufferedRewriteCostMultiplier),
+	)
 }
 
-func isUsableMemoryBudget(value int64) bool {
-	return value > 0 && value < maxInt64 && value < maxReasonableMemoryBytes
+func computeBufferedDecisionFraction(snapshot htmlRewriteTuningSnapshot) float64 {
+	confidence := htmlRewriteCalibrationConfidence(snapshot)
+	speedGain := bufferedSpeedGainRatio(snapshot)
+	return clampFloat64(0.82+confidence*speedGain*0.45, 0.82, 0.97)
+}
+
+func deriveStreamRewriteChunkBytes(usableBudgetBytes int64, snapshot htmlRewriteTuningSnapshot) int {
+	if usableBudgetBytes <= 0 {
+		return minStreamRewriteChunkBytes
+	}
+	workspaceBudget := usableBudgetBytes / streamWorkspaceDivisor
+	if workspaceBudget > maxStreamWorkspaceBytes {
+		workspaceBudget = maxStreamWorkspaceBytes
+	}
+	if workspaceBudget <= streamRewriteFixedCostBytes {
+		return minStreamRewriteChunkBytes
+	}
+	chunkBudget := (workspaceBudget - streamRewriteFixedCostBytes) / streamWorkspaceChunkFactor
+	baseChunk := clampInt(int(chunkBudget), minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes)
+	cpuBias := 1.0 + htmlRewriteCalibrationConfidence(snapshot)*clampFloat64(bufferedSpeedGainRatio(snapshot)*0.30, 0, 0.10)
+	return alignStreamChunkBytes(clampInt(int(float64(baseChunk)*cpuBias), minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes))
+}
+
+func htmlRewriteCalibrationConfidence(snapshot htmlRewriteTuningSnapshot) float64 {
+	samples := float64(snapshot.BufferedSamples + snapshot.StreamingSamples)
+	if samples <= 0 {
+		return 0
+	}
+	return clampFloat64(samples/htmlRewriteConfidenceTargetSamples, 0, 1)
+}
+
+func bufferedSpeedGainRatio(snapshot htmlRewriteTuningSnapshot) float64 {
+	buffered := positiveOrDefaultFloat64(snapshot.BufferedNsPerByte, defaultBufferedRewriteNsPerByte)
+	streaming := positiveOrDefaultFloat64(snapshot.StreamNsPerByte, defaultStreamRewriteNsPerByte)
+	if streaming <= 0 || buffered <= 0 || streaming <= buffered {
+		return 0
+	}
+	return clampFloat64((streaming-buffered)/streaming, 0, 0.50)
+}
+
+func alignStreamChunkBytes(value int) int {
+	const step = 4 << 10
+	if value <= minStreamRewriteChunkBytes {
+		return minStreamRewriteChunkBytes
+	}
+	if value >= maxStreamRewriteChunkBytes {
+		return maxStreamRewriteChunkBytes
+	}
+	return clampInt(((value+(step/2))/step)*step, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes)
+}
+
+func currentHTMLRewriteConcurrency() int64 {
+	n := rewritebudget.CurrentActiveCount()
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+func currentHTMLRewriteCount() int64 {
+	n := activeHTMLRewriteCount.Load()
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+func beginHTMLRewrite() func() {
+	finishGlobal := rewritebudget.Begin()
+	activeHTMLRewriteCount.Add(1)
+	return func() {
+		activeHTMLRewriteCount.Add(-1)
+		finishGlobal()
+	}
+}
+
+func htmlRewriteDecisionBucket(contentLength int64) int {
+	switch {
+	case contentLength <= 256<<10:
+		return 0
+	case contentLength <= 512<<10:
+		return 1
+	case contentLength <= 1<<20:
+		return 2
+	case contentLength <= 2<<20:
+		return 3
+	case contentLength <= 4<<20:
+		return 4
+	default:
+		return 5
+	}
+}
+
+func clampFloat64(value, minValue, maxValue float64) float64 {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func clampFloat64ToInt64(value float64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	if value >= float64(maxInt64) {
+		return maxInt64
+	}
+	return int64(value)
+}
+
+func maxFloat64(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxInt64Value(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func positiveOrDefaultFloat64(value, fallback float64) float64 {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func positiveDeltaInt64(after, before int64) int64 {
+	if after <= before {
+		return 0
+	}
+	return after - before
+}
+
+func nsPerByteToBytesPerSecond(nsPerByte float64) int64 {
+	if nsPerByte <= 0 {
+		return 0
+	}
+	return clampFloat64ToInt64(1_000_000_000 / nsPerByte)
 }
 
 func clampInt64(value, minValue, maxValue int64) int64 {
@@ -978,6 +1500,34 @@ type streamReplacement struct {
 	old  []byte
 	new  []byte
 	tail []byte
+}
+
+type countingReader struct {
+	src io.Reader
+	n   int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	if r == nil || r.src == nil {
+		return 0, io.EOF
+	}
+	n, err := r.src.Read(p)
+	r.n += int64(n)
+	return n, err
+}
+
+type countingWriter struct {
+	dst io.Writer
+	n   int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	if w == nil || w.dst == nil {
+		return 0, io.ErrClosedPipe
+	}
+	n, err := w.dst.Write(p)
+	w.n += int64(n)
+	return n, err
 }
 
 func buildReplacementPairs(upstreamDomain, hostName string, replaceDict map[string]string) []replacementPair {
