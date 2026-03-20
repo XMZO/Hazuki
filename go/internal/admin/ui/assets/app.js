@@ -222,7 +222,7 @@
   };
 
   const updateTrafficDom = (agg, prev, dt) => {
-    const card = qs("#hz-traffic-card");
+    const card = qs("#hz-traffic-card") || qs("#dashboard-traffic");
     if (!card) return;
 
     for (const row of qsa("tr[data-hz-svc]", card)) {
@@ -254,7 +254,7 @@
   };
 
   const updateRedisDom = (redis) => {
-    const card = qs("#hz-redis-card");
+    const card = qs("#hz-redis-card") || qs("#dashboard-redis");
     if (!card) return;
 
     const pill = qs("#hz-redis-pill", card);
