@@ -492,6 +492,32 @@ body.hz-modal-open {
   margin: 0 0 8px;
 }
 
+.hz-anchor {
+  scroll-margin-top: 88px;
+}
+
+.hz-page-jump,
+.hz-system-jump {
+  margin-top: 12px;
+}
+
+.hz-system-wide {
+  grid-column: 1 / -1;
+}
+
+.hz-accordion-head {
+  display: grid;
+  gap: 4px;
+}
+
+.hz-accordion-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -529,6 +555,14 @@ body.hz-modal-open {
 @media (max-width: 980px) {
   .kvs {
     grid-template-columns: 1fr;
+  }
+
+  .hz-system-wide {
+    grid-column: auto;
+  }
+
+  .hz-accordion-status {
+    justify-content: flex-start;
   }
 }
 

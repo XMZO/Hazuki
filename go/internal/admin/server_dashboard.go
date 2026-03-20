@@ -320,6 +320,11 @@ func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: s.config.GetUpdatedAt(),
 		Ports:     cfg.Ports,
 		AdminURL:  adminURL,
+		AdminStatus: checkServiceStatusWithCookie(
+			r.Context(),
+			s.port,
+			sessionCookieValue(r),
+		),
 
 		TorcherinoURL:       torcherinoURL,
 		TorcherinoHealthURL: "/_hazuki/health/torcherino",

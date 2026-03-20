@@ -37,6 +37,8 @@ type dashboardData struct {
 	Ports     model.PortsConfig
 	AdminURL  string
 
+	AdminStatus serviceStatus
+
 	TorcherinoURL       string
 	TorcherinoHealthURL string
 	TorcherinoStatus    serviceStatus

@@ -1,6 +1,6 @@
 {{define "redis_cache"}}
   <div class="grid hz-redis-cache">
-    <div class="card">
+    <div class="card hz-anchor" id="redis-cache-overview">
       <h2>{{.Title}}</h2>
       <div class="muted small">{{.T "redisCache.subtitle"}}</div>
       <div class="btn-row">
@@ -10,10 +10,21 @@
         <a class="btn {{if eq .Namespace "cdnjs"}}primary{{end}}" href="/system/redis-cache?ns=cdnjs&limit={{.Limit}}">{{.T "redisCache.namespace.cdnjs"}}</a>
         <a class="btn {{if eq .Namespace "torcherino"}}primary{{end}}" href="/system/redis-cache?ns=torcherino&limit={{.Limit}}">{{.T "redisCache.namespace.torcherino"}}</a>
       </div>
+      <div class="btn-row hz-page-jump">
+        <a class="btn" href="#redis-cache-status">{{.T "system.redisTitle"}}</a>
+        {{if eq .Redis.Status "ok"}}<a class="btn" href="#redis-cache-actions">{{.T "redisCache.actions"}}</a>{{end}}
+        {{if eq .Redis.Status "ok"}}<a class="btn" href="#redis-cache-list">{{.T "redisCache.listTitle"}}</a>{{end}}
+      </div>
     </div>
 
-    <div class="card">
-      <h3>{{.T "system.redisTitle"}}</h3>
+    <details class="card accordion hz-anchor" id="redis-cache-status">
+      <summary>
+        <div class="hz-accordion-head">
+          <span>{{.T "system.redisTitle"}}</span>
+          <span class="muted small">{{.T "redisCache.namespaceLabel"}}：{{.Namespace}}</span>
+        </div>
+      </summary>
+      <div class="body">
 
       {{if eq .Redis.Status "ok"}}
         <div class="pill ok">{{.T "redis.ok"}} · {{.Redis.LatencyMS}}ms · <code>{{.Redis.Addr}}</code></div>
@@ -53,27 +64,34 @@
       {{else}}
         <div class="pill">{{.T "redis.notConfigured"}}</div>
       {{end}}
-    </div>
+      </div>
+    </details>
 
     {{if eq .Redis.Status "ok"}}
-      <div class="card">
-        <h3>{{.T "redisCache.actions"}}</h3>
-        <div class="muted small">{{.T "redisCache.clearHint"}} <code>{{.ClearableDesc}}</code></div>
-        <form method="post" action="/system/redis-cache/clear" style="margin-top:12px;">
-          <input type="hidden" name="ns" value="{{.Namespace}}" />
-          <button
-            class="btn danger"
-            type="submit"
-            data-confirm-submit="{{.T "redisCache.clearConfirmTitle"}}"
-            data-confirm-detail="{{.T "redisCache.clearConfirmDetail"}}"
-            data-confirm-ok="{{.T "redisCache.clearConfirmOk"}}"
-          >
-            {{.T "redisCache.clearAll"}}
-          </button>
-        </form>
-      </div>
+      <details class="card accordion hz-anchor" id="redis-cache-actions">
+        <summary>
+          <div class="hz-accordion-head">
+            <span>{{.T "redisCache.actions"}}</span>
+            <span class="muted small">{{.T "redisCache.clearHint"}} <code>{{.ClearableDesc}}</code></span>
+          </div>
+        </summary>
+        <div class="body">
+          <form method="post" action="/system/redis-cache/clear">
+            <input type="hidden" name="ns" value="{{.Namespace}}" />
+            <button
+              class="btn danger"
+              type="submit"
+              data-confirm-submit="{{.T "redisCache.clearConfirmTitle"}}"
+              data-confirm-detail="{{.T "redisCache.clearConfirmDetail"}}"
+              data-confirm-ok="{{.T "redisCache.clearConfirmOk"}}"
+            >
+              {{.T "redisCache.clearAll"}}
+            </button>
+          </form>
+        </div>
+      </details>
 
-      <div class="card">
+      <div class="card hz-anchor" id="redis-cache-list">
         <h3>{{.T "redisCache.listTitle"}}</h3>
         {{if not .Entries}}
           <div class="muted small">{{.T "redisCache.empty"}}</div>

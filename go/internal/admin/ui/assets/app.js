@@ -1324,6 +1324,22 @@
     ensureDashboardStats();
     ensureTrafficPage();
     ensureSystemPage();
+    openHashAccordion();
+  };
+
+  const openHashAccordion = () => {
+    const hash = ((window.location && window.location.hash) || "").toString().trim();
+    if (!hash || hash.length < 2) return;
+
+    let target = null;
+    try {
+      target = document.querySelector(hash);
+    } catch {
+      return;
+    }
+    if (!(target instanceof HTMLDetailsElement)) return;
+    if (!target.classList.contains("accordion")) return;
+    target.open = true;
   };
 
   const updateNavActive = (pathname) => {
@@ -1954,6 +1970,7 @@
   document.addEventListener("input", onPreviewInput);
   document.addEventListener("change", onPreviewInput);
   window.addEventListener("popstate", onPopState);
+  window.addEventListener("hashchange", openHashAccordion);
   window.addEventListener("storage", (e) => {
     if (!e) return;
     if (e.key !== THEME_KEY) return;

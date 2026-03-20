@@ -1,12 +1,18 @@
 {{define "wizard"}}
   <div class="grid">
-    <div class="card">
+    <div class="card hz-anchor" id="wizard-overview">
       <h2>{{.Title}}</h2>
       <div class="muted small">{{.T "wizard.subtitle"}}</div>
+      <div class="btn-row hz-page-jump">
+        <a class="btn" href="#wizard-torcherino">Torcherino</a>
+        <a class="btn" href="#wizard-cdnjs">{{.T "nav.cdnjs"}}</a>
+        <a class="btn" href="#wizard-git">{{.T "nav.git"}}</a>
+        <a class="btn" href="#wizard-save">{{.T "common.save"}}</a>
+      </div>
     </div>
 
     <form class="form" method="post" action="/wizard">
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="wizard-torcherino">
         <summary>Torcherino <span class="muted small">{{.T "torcherino.tagline"}}</span></summary>
         <div class="body">
           <div class="field">
@@ -65,7 +71,7 @@
         </div>
       </details>
 
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="wizard-cdnjs">
         <summary>{{.T "nav.cdnjs"}} <span class="muted small">{{.T "cdnjs.tagline"}}</span></summary>
         <div class="body">
           <div class="grid cols-2">
@@ -111,7 +117,7 @@
         </div>
       </details>
 
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="wizard-git">
         <summary>{{.T "nav.git"}}</summary>
         <div class="body">
           <div class="field">
@@ -138,7 +144,7 @@
         </div>
       </details>
 
-      <div class="card">
+      <div class="card hz-anchor" id="wizard-save">
         <h3>{{.T "common.save"}}</h3>
         <div class="btn-row">
           <button class="btn primary" type="submit">{{.T "wizard.saveConfig"}}</button>

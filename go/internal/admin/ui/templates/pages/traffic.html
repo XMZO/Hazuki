@@ -1,127 +1,141 @@
 {{define "traffic"}}
-  <div class="grid">
-    <div class="card">
+  <div class="grid hz-traffic-page">
+    <div class="card hz-anchor" id="traffic-overview">
       <h2>{{.Title}}</h2>
       <div class="muted small">{{.T "traffic.subtitle"}}</div>
+      <div class="btn-row hz-page-jump">
+        <a class="btn" href="#traffic-chart">{{.T "traffic.chartTitle"}}</a>
+        <a class="btn" href="#traffic-manage">{{.T "traffic.manageTitle"}}</a>
+      </div>
     </div>
 
     <div class="grid cols-2">
-      <div class="card">
-        <h3>{{.T "traffic.chartTitle"}}</h3>
-        <div class="muted small">{{.T "traffic.chartHint"}}</div>
+      <details class="card accordion hz-anchor" id="traffic-chart" open>
+        <summary>
+          <div class="hz-accordion-head">
+            <span>{{.T "traffic.chartTitle"}}</span>
+            <span class="muted small">{{.T "traffic.chartHint"}}</span>
+          </div>
+        </summary>
+        <div class="body">
+          <div class="hz-traffic-controls">
+            <div class="segmented" data-hz-traffic-kind>
+              <button class="seg active" type="button" data-hz-kind="hour">{{.T "traffic.kind.hour"}}</button>
+              <button class="seg" type="button" data-hz-kind="day">{{.T "traffic.kind.day"}}</button>
+              <button class="seg" type="button" data-hz-kind="month">{{.T "traffic.kind.month"}}</button>
+              <button class="seg" type="button" data-hz-kind="year">{{.T "traffic.kind.year"}}</button>
+            </div>
 
-        <div class="hz-traffic-controls">
-          <div class="segmented" data-hz-traffic-kind>
-            <button class="seg active" type="button" data-hz-kind="hour">{{.T "traffic.kind.hour"}}</button>
-            <button class="seg" type="button" data-hz-kind="day">{{.T "traffic.kind.day"}}</button>
-            <button class="seg" type="button" data-hz-kind="month">{{.T "traffic.kind.month"}}</button>
-            <button class="seg" type="button" data-hz-kind="year">{{.T "traffic.kind.year"}}</button>
+            <div class="hz-traffic-inline">
+              <div class="muted small">{{.T "traffic.serviceLabel"}}</div>
+              <select id="hzTrafficSvc">
+                <option value="total">{{.T "traffic.service.total"}}</option>
+                <option value="torcherino">Torcherino</option>
+                <option value="cdnjs">{{.T "nav.cdnjs"}}</option>
+                <option value="git">{{.T "nav.git"}}</option>
+                <option value="sakuya">{{.T "nav.sakuya"}}</option>
+                <option value="patchouli">{{.T "nav.patchouli"}}</option>
+                {{if .GitInstances}}
+                  <optgroup label="{{.T "traffic.service.gitInstances"}}">
+                    {{range .GitInstances}}
+                      <option value="{{.Value}}">{{.Name}} ({{.ID}})</option>
+                    {{end}}
+                  </optgroup>
+                {{end}}
+              </select>
+            </div>
+
+            <button class="btn" type="button" id="hzTrafficRefresh">{{.T "traffic.refresh"}}</button>
           </div>
 
-          <div class="hz-traffic-inline">
-            <div class="muted small">{{.T "traffic.serviceLabel"}}</div>
-            <select id="hzTrafficSvc">
-              <option value="total">{{.T "traffic.service.total"}}</option>
-              <option value="torcherino">Torcherino</option>
-              <option value="cdnjs">{{.T "nav.cdnjs"}}</option>
-              <option value="git">{{.T "nav.git"}}</option>
-              <option value="sakuya">{{.T "nav.sakuya"}}</option>
-              <option value="patchouli">{{.T "nav.patchouli"}}</option>
-              {{if .GitInstances}}
-                <optgroup label="{{.T "traffic.service.gitInstances"}}">
-                  {{range .GitInstances}}
-                    <option value="{{.Value}}">{{.Name}} ({{.ID}})</option>
-                  {{end}}
-                </optgroup>
-              {{end}}
-            </select>
+          <div class="hz-chart" id="hzTrafficChart" style="margin-top:12px;">
+            <svg viewBox="0 0 1000 260" preserveAspectRatio="none" aria-hidden="true">
+              <path id="hzTrafficGrid" class="hz-chart-grid" d=""></path>
+              <path id="hzTrafficOut" class="hz-chart-line out" d=""></path>
+              <path id="hzTrafficIn" class="hz-chart-line in" d=""></path>
+            </svg>
+            <div class="hz-chart-legend">
+              <span class="pill"><span class="dot out"></span>{{.T "traffic.legend.out"}}: <code id="hzTrafficOutLast">-</code></span>
+              <span class="pill"><span class="dot in"></span>{{.T "traffic.legend.in"}}: <code id="hzTrafficInLast">-</code></span>
+            </div>
+            <div class="muted small" style="margin-top:10px;" id="hzTrafficRange">-</div>
           </div>
 
-          <button class="btn" type="button" id="hzTrafficRefresh">{{.T "traffic.refresh"}}</button>
+          <div class="table-wrap" style="margin-top:12px;">
+            <table class="table" aria-label="{{.T "traffic.tableTitle"}}">
+              <thead>
+                <tr>
+                  <th>{{.T "traffic.table.time"}}</th>
+                  <th>{{.T "traffic.table.out"}}</th>
+                  <th>{{.T "traffic.table.in"}}</th>
+                  <th>{{.T "traffic.table.req"}}</th>
+                </tr>
+              </thead>
+              <tbody id="hzTrafficTableBody">
+                <tr><td colspan="4" class="muted small">-</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
+      </details>
 
-        <div class="hz-chart" id="hzTrafficChart" style="margin-top:12px;">
-          <svg viewBox="0 0 1000 260" preserveAspectRatio="none" aria-hidden="true">
-            <path id="hzTrafficGrid" class="hz-chart-grid" d=""></path>
-            <path id="hzTrafficOut" class="hz-chart-line out" d=""></path>
-            <path id="hzTrafficIn" class="hz-chart-line in" d=""></path>
-          </svg>
-          <div class="hz-chart-legend">
-            <span class="pill"><span class="dot out"></span>{{.T "traffic.legend.out"}}: <code id="hzTrafficOutLast">-</code></span>
-            <span class="pill"><span class="dot in"></span>{{.T "traffic.legend.in"}}: <code id="hzTrafficInLast">-</code></span>
+      <details class="card accordion hz-anchor" id="traffic-manage">
+        <summary>
+          <div class="hz-accordion-head">
+            <span>{{.T "traffic.manageTitle"}}</span>
+            <span class="muted small">{{.T "traffic.manageHint"}}</span>
           </div>
-          <div class="muted small" style="margin-top:10px;" id="hzTrafficRange">-</div>
+        </summary>
+        <div class="body">
+          <form class="form" method="post" action="/traffic/retention">
+            <div class="grid cols-2">
+              <div class="field">
+                <label>{{.T "traffic.retention.hourDays"}}</label>
+                <input type="number" min="0" name="hourDays" value="{{.Retention.HourDays}}" />
+                <div class="hint">{{.T "traffic.retention.hourHint"}}</div>
+              </div>
+              <div class="field">
+                <label>{{.T "traffic.retention.dayDays"}}</label>
+                <input type="number" min="0" name="dayDays" value="{{.Retention.DayDays}}" />
+                <div class="hint">{{.T "traffic.retention.dayHint"}}</div>
+              </div>
+              <div class="field">
+                <label>{{.T "traffic.retention.monthMonths"}}</label>
+                <input type="number" min="0" name="monthMonths" value="{{.Retention.MonthMonths}}" />
+                <div class="hint">{{.T "traffic.retention.monthHint"}}</div>
+              </div>
+              <div class="field">
+                <label>{{.T "traffic.retention.yearYears"}}</label>
+                <input type="number" min="0" name="yearYears" value="{{.Retention.YearYears}}" />
+                <div class="hint">{{.T "traffic.retention.yearHint"}}</div>
+              </div>
+            </div>
+
+            <div class="btn-row">
+              <button class="btn primary" type="submit">{{.T "traffic.saveRetention"}}</button>
+              <button class="btn" type="submit" formaction="/traffic/cleanup">{{.T "traffic.runCleanup"}}</button>
+            </div>
+          </form>
+
+          <form method="post" action="/traffic/clear" style="margin-top:18px;">
+            <div class="field">
+              <label>{{.T "traffic.clearTitle"}}</label>
+              <div class="hint">{{.T "traffic.clearHint"}}</div>
+            </div>
+            <button
+              class="btn danger"
+              type="submit"
+              data-confirm-submit="{{.T "traffic.clearConfirmTitle"}}"
+              data-confirm-detail="{{.T "traffic.clearConfirmDetail"}}"
+              data-confirm-ok="{{.T "traffic.clearConfirmOk"}}"
+            >
+              {{.T "traffic.clearBtn"}}
+            </button>
+          </form>
+
+          <div class="muted small" style="margin-top:14px;">{{.T "traffic.note"}}</div>
         </div>
-
-        <div class="table-wrap" style="margin-top:12px;">
-          <table class="table" aria-label="{{.T "traffic.tableTitle"}}">
-            <thead>
-              <tr>
-                <th>{{.T "traffic.table.time"}}</th>
-                <th>{{.T "traffic.table.out"}}</th>
-                <th>{{.T "traffic.table.in"}}</th>
-                <th>{{.T "traffic.table.req"}}</th>
-              </tr>
-            </thead>
-            <tbody id="hzTrafficTableBody">
-              <tr><td colspan="4" class="muted small">-</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>{{.T "traffic.manageTitle"}}</h3>
-        <div class="muted small">{{.T "traffic.manageHint"}}</div>
-
-        <form class="form" method="post" action="/traffic/retention" style="margin-top:14px;">
-          <div class="grid cols-2">
-            <div class="field">
-              <label>{{.T "traffic.retention.hourDays"}}</label>
-              <input type="number" min="0" name="hourDays" value="{{.Retention.HourDays}}" />
-              <div class="hint">{{.T "traffic.retention.hourHint"}}</div>
-            </div>
-            <div class="field">
-              <label>{{.T "traffic.retention.dayDays"}}</label>
-              <input type="number" min="0" name="dayDays" value="{{.Retention.DayDays}}" />
-              <div class="hint">{{.T "traffic.retention.dayHint"}}</div>
-            </div>
-            <div class="field">
-              <label>{{.T "traffic.retention.monthMonths"}}</label>
-              <input type="number" min="0" name="monthMonths" value="{{.Retention.MonthMonths}}" />
-              <div class="hint">{{.T "traffic.retention.monthHint"}}</div>
-            </div>
-            <div class="field">
-              <label>{{.T "traffic.retention.yearYears"}}</label>
-              <input type="number" min="0" name="yearYears" value="{{.Retention.YearYears}}" />
-              <div class="hint">{{.T "traffic.retention.yearHint"}}</div>
-            </div>
-          </div>
-
-          <div class="btn-row">
-            <button class="btn primary" type="submit">{{.T "traffic.saveRetention"}}</button>
-            <button class="btn" type="submit" formaction="/traffic/cleanup">{{.T "traffic.runCleanup"}}</button>
-          </div>
-        </form>
-
-        <form method="post" action="/traffic/clear" style="margin-top:18px;">
-          <div class="field">
-            <label>{{.T "traffic.clearTitle"}}</label>
-            <div class="hint">{{.T "traffic.clearHint"}}</div>
-          </div>
-          <button
-            class="btn danger"
-            type="submit"
-            data-confirm-submit="{{.T "traffic.clearConfirmTitle"}}"
-            data-confirm-detail="{{.T "traffic.clearConfirmDetail"}}"
-            data-confirm-ok="{{.T "traffic.clearConfirmOk"}}"
-          >
-            {{.T "traffic.clearBtn"}}
-          </button>
-        </form>
-
-        <div class="muted small" style="margin-top:14px;">{{.T "traffic.note"}}</div>
-      </div>
+      </details>
     </div>
   </div>
 {{end}}

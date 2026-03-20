@@ -1,6 +1,6 @@
 {{define "torcherino"}}
   <div class="grid">
-    <div class="card">
+    <div class="card hz-anchor" id="torcherino-overview">
       <h2>{{.Title}} <span class="muted small">{{.T "torcherino.tagline"}}</span></h2>
       <div class="muted small">{{.T "torcherino.subtitle"}}</div>
       <div class="btn-row">
@@ -11,9 +11,17 @@
       {{if and (eq .TorcherinoStatus.Status "error") .TorcherinoStatus.Error}}
         <div class="muted small" style="margin-top:10px;">{{.T "common.healthErrorPrefix"}}：{{.TorcherinoStatus.Error}}</div>
       {{end}}
+      <div class="btn-row hz-page-jump">
+        <a class="btn" href="#torcherino-basic">{{.T "common.basicConfig"}}</a>
+        <a class="btn" href="#torcherino-preview">{{.T "common.preview"}}</a>
+        <a class="btn" href="#torcherino-host-mapping">HOST_MAPPING</a>
+        <a class="btn" href="#torcherino-secret">Worker Secret</a>
+        <a class="btn" href="#torcherino-cache">{{.T "torcherino.redisCacheTitle"}}</a>
+        <a class="btn" href="#torcherino-save">{{.T "common.save"}}</a>
+      </div>
     </div>
 
-    <div class="card">
+    <div class="card hz-anchor" id="torcherino-client-info">
       <h3>{{.T "torcherino.clientInfoTitle"}}</h3>
       <div class="muted small">{{.T "torcherino.clientInfoHint"}}</div>
       <div class="grid cols-2" style="margin-top:10px;">
@@ -45,7 +53,7 @@
     </div>
 
     <form class="form" method="post" action="/config/torcherino">
-      <div class="card">
+      <div class="card hz-anchor" id="torcherino-basic">
         <h3>{{.T "common.basicConfig"}}</h3>
         <div class="grid cols-2">
           <div class="field">
@@ -85,7 +93,7 @@
         </div>
       </div>
 
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="torcherino-preview">
         <summary>{{.T "common.preview"}} <span class="muted small">{{.T "common.previewNoRequest"}}</span></summary>
         <div class="body">
           <div class="muted small">{{.T "torcherino.previewHint"}}</div>
@@ -112,7 +120,7 @@
         </div>
       </details>
 
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="torcherino-host-mapping">
         <summary>HOST_MAPPING <span class="muted small">{{.T "torcherino.hostMappingTagline"}}</span></summary>
         <div class="body">
           <div class="field">
@@ -128,7 +136,7 @@
         </div>
       </details>
 
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="torcherino-secret">
         <summary>Worker Secret <span class="muted small">{{.T "common.optionalTag"}}</span></summary>
         <div class="body">
           <div class="grid cols-2">
@@ -171,7 +179,7 @@
         </div>
       </details>
 
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="torcherino-cache">
         <summary>{{.T "torcherino.redisCacheTitle"}} <span class="muted small">{{.T "common.optionalTag"}}</span></summary>
         <div class="body">
           <div class="muted small">{{.T "torcherino.redisCacheHint"}}</div>
@@ -205,7 +213,7 @@
         </div>
       </details>
 
-      <div class="card">
+      <div class="card hz-anchor" id="torcherino-save">
         <h3>{{.T "common.save"}}</h3>
         <div class="btn-row">
           <button class="btn primary" type="submit">{{.T "common.save"}}</button>

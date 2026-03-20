@@ -1,6 +1,6 @@
 {{define "git"}}
   <div class="grid">
-    <div class="card">
+    <div class="card hz-anchor" id="git-overview">
       <h2>{{.Title}}</h2>
       <div class="muted small">{{.T "git.subtitle"}}</div>
       <div class="btn-row">
@@ -12,9 +12,18 @@
       {{if and (eq .GitStatus.Status "error") .GitStatus.Error}}
         <div class="muted small" style="margin-top:10px;">{{.T "common.healthErrorPrefix"}}：{{.GitStatus.Error}}</div>
       {{end}}
+      <div class="btn-row hz-page-jump">
+        <a class="btn" href="#git-instances">{{.T "git.instancesTitle"}}</a>
+        <a class="btn" href="#git-basic">{{.T "common.basicConfig"}}</a>
+        <a class="btn" href="#git-auth">{{.T "git.authTitle"}}</a>
+        <a class="btn" href="#git-cache">{{.T "git.cachePolicyTitle"}}</a>
+        <a class="btn" href="#git-access">{{.T "git.accessControlTitle"}}</a>
+        <a class="btn" href="#git-rewrite">{{.T "git.replaceTitle"}}</a>
+        <a class="btn" href="#git-save">{{.T "common.save"}}</a>
+      </div>
     </div>
 
-    <div class="card">
+    <div class="card hz-anchor" id="git-instances">
       <h3>{{.T "git.instancesTitle"}}</h3>
       <div class="muted small">{{.T "git.instancesHint"}}</div>
 
@@ -97,7 +106,7 @@
 
     <form class="form" method="post" action="/config/git">
       <input type="hidden" name="instanceID" value="{{.CurrentInstanceID}}" />
-      <div class="card">
+      <div class="card hz-anchor" id="git-basic">
         <h3>{{.T "common.basicConfig"}}</h3>
 
         <div class="grid cols-2">
@@ -153,7 +162,7 @@
         </div>
       </div>
 
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="git-auth">
         <summary>{{.T "git.authTitle"}} <span class="muted small">{{.T "git.githubTokenTag"}}</span></summary>
         <div class="body">
           <div class="field">
@@ -184,7 +193,7 @@
         </div>
       </details>
 
-      <details class="card accordion" open>
+      <details class="card accordion hz-anchor" id="git-cache">
         <summary>{{.T "git.cachePolicyTitle"}} <span class="muted small">（Cache-Control）</span></summary>
         <div class="body">
           <div class="field">
@@ -218,7 +227,7 @@
         </div>
       </details>
 
-      <details class="card accordion">
+      <details class="card accordion hz-anchor" id="git-cors">
         <summary>CORS</summary>
         <div class="body">
           <div class="field">
@@ -241,7 +250,7 @@
         </div>
       </details>
 
-      <details class="card accordion">
+      <details class="card accordion hz-anchor" id="git-access">
         <summary>{{.T "git.accessControlTitle"}}</summary>
         <div class="body">
           <div class="grid cols-2">
@@ -259,7 +268,7 @@
         </div>
       </details>
 
-      <details class="card accordion">
+      <details class="card accordion hz-anchor" id="git-rewrite">
         <summary>{{.T "git.replaceTitle"}}</summary>
         <div class="body">
           <div class="field">
@@ -276,7 +285,7 @@
         </div>
       </details>
 
-      <div class="card">
+      <div class="card hz-anchor" id="git-save">
         <h3>{{.T "common.save"}}</h3>
         <div class="field">
           <label>{{.T "common.noteOptional"}}</label>

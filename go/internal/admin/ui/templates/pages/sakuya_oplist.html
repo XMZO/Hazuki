@@ -1,6 +1,6 @@
 {{define "sakuya_oplist"}}
   <div class="grid">
-      <div class="card">
+      <div class="card hz-anchor" id="sakuya-overview">
       <h2>{{.Title}} <span class="muted small">{{.T "sakuya.oplist.tagline"}}</span></h2>
       <div class="muted small">{{.T "sakuya.oplist.subtitle"}}</div>
       <div class="hz-callout err" style="margin-top:12px;">
@@ -33,9 +33,14 @@
       {{if and (eq .SakuyaStatus.Status "error") .SakuyaStatus.Error}}
         <div class="muted small" style="margin-top:10px;">{{.T "common.healthErrorPrefix"}}：{{.SakuyaStatus.Error}}</div>
       {{end}}
+      <div class="btn-row hz-page-jump">
+        <a class="btn" href="#sakuya-instances">{{.T "sakuya.instances.title"}}</a>
+        <a class="btn" href="#sakuya-basic">{{.T "common.basicConfig"}}</a>
+        <a class="btn" href="#sakuya-save">{{.T "common.save"}}</a>
+      </div>
     </div>
 
-    <div class="card">
+    <div class="card hz-anchor" id="sakuya-instances">
       <h3>{{.T "sakuya.instances.title"}}</h3>
       <div class="muted small">{{.T "sakuya.instances.hint"}}</div>
 
@@ -110,7 +115,7 @@
 
     <form class="form" method="post" action="/config/sakuya/oplist">
       <input type="hidden" name="instanceID" value="{{.CurrentInstanceID}}" />
-      <div class="card">
+      <div class="card hz-anchor" id="sakuya-basic">
         <h3>{{.T "common.basicConfig"}}</h3>
         <div class="grid cols-2">
           {{if ne .CurrentInstanceID ""}}
@@ -198,7 +203,7 @@
           <div class="hint">{{.T "sakuya.serviceToggleHint"}}</div>
         </div>
 
-        <div class="btn-row">
+        <div class="btn-row" id="sakuya-save">
           <button class="btn primary" type="submit">{{.T "common.save"}}</button>
         </div>
       </div>

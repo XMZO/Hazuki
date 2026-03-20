@@ -1,8 +1,15 @@
 {{define "system"}}
-  <div class="grid">
-    <div class="card">
+  <div class="grid hz-system-page">
+    <div class="card hz-anchor" id="system-overview">
       <h2>{{.Title}}</h2>
       <div class="muted small">{{.T "system.subtitle"}}</div>
+      <div class="btn-row hz-system-jump">
+        <a class="btn" href="#system-overview">{{.T "system.runtimeTitle"}}</a>
+        <a class="btn" href="#system-panel">{{.T "system.timezoneTitle"}}</a>
+        <a class="btn" href="#system-security">{{.T "system.masterKeyTitle"}}</a>
+        <a class="btn" href="#system-health">{{.T "system.servicesTitle"}}</a>
+        <a class="btn" href="#system-redis">{{.T "system.redisTitle"}}</a>
+      </div>
     </div>
 
     <div class="grid cols-2">
@@ -53,12 +60,11 @@
           <a class="btn" href="/config/export">{{.T "nav.export"}}</a>
         </div>
       </div>
-    </div>
 
-    <div class="card" data-hz-git-rewrite-card>
-      <h3>{{.T "system.gitRewriteTitle"}}</h3>
-      <div class="muted small">{{.T "system.gitRewriteHint"}}</div>
-      <div class="kvs" style="margin-top:12px;" data-hz-git-rewrite-enabled {{if not .GitHTMLRewrite.Enabled}}hidden{{end}}>
+      <div class="card hz-system-wide hz-anchor" id="system-git-rewrite" data-hz-git-rewrite-card>
+        <h3>{{.T "system.gitRewriteTitle"}}</h3>
+        <div class="muted small">{{.T "system.gitRewriteHint"}}</div>
+        <div class="kvs" style="margin-top:12px;" data-hz-git-rewrite-enabled {{if not .GitHTMLRewrite.Enabled}}hidden{{end}}>
           <div class="muted">{{.T "system.gitRewrite.budgetSource"}}</div>
           <div><code data-hz-git-rewrite-field="budgetSource">{{.GitHTMLRewrite.BudgetSource}}</code></div>
           <div class="muted">{{.T "system.gitRewrite.memoryBudget"}}</div>
@@ -75,170 +81,209 @@
           <div><code data-hz-git-rewrite-field="streamChunk">{{.GitHTMLRewrite.StreamChunk}}</code></div>
           <div class="muted">{{.T "system.gitRewrite.unknownLength"}}</div>
           <div><code data-hz-git-rewrite-field="unknownLength">{{.GitHTMLRewrite.UnknownLength}}</code></div>
-      </div>
-      <div style="margin-top:12px;" data-hz-git-rewrite-disabled {{if .GitHTMLRewrite.Enabled}}hidden{{end}}>
+        </div>
+        <div style="margin-top:12px;" data-hz-git-rewrite-disabled {{if .GitHTMLRewrite.Enabled}}hidden{{end}}>
           <span class="pill err">{{.T "common.disabled"}}</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>{{.T "system.timezoneTitle"}}</h3>
-      <div class="muted small">{{.T "system.timezoneHint"}}</div>
-      <form method="post" action="/system/timezone" class="form" style="margin-top:12px;">
-        <div class="field">
-          <label>{{.T "system.timezoneLabel"}}</label>
-          <input type="text" name="timeZone" value="{{.TimeZone}}" placeholder="{{.T "system.timezonePlaceholder"}}" />
-          <div class="hint">{{.T "system.timezoneHint2"}}</div>
-        </div>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="card">
-      <h3>{{.T "system.masterKeyVerifyTitle"}}</h3>
-      <div class="muted small">{{.T "system.masterKeyVerifyHint"}}</div>
-      <form method="post" action="/system/master-key/verify" class="form" style="margin-top:12px;">
-        <div class="grid cols-2">
-          <div class="field" style="margin:0">
-            <label>{{.T "system.masterKeyCurrent"}}</label>
-            <input type="password" name="currentMasterKey" autocomplete="off" placeholder="{{.T "system.masterKeyCurrentPlaceholder"}}" />
-          </div>
-          <div class="field" style="margin:0">
-            <label>{{.T "system.masterKeyPassword"}}</label>
-            <input type="password" name="password" autocomplete="current-password" placeholder="{{.T "system.masterKeyPasswordPlaceholder"}}" />
-          </div>
-        </div>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "system.masterKeyVerify"}}</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="card">
-      <h3>{{.T "system.masterKeyTitle"}}</h3>
-      <div class="muted small">{{.T "system.masterKeyHint"}}</div>
-      <form method="post" action="/system/master-key" class="form" style="margin-top:12px;">
-        <div class="grid cols-2">
-          <div class="field" style="margin:0">
-            <label>{{.T "system.masterKeyCurrent"}}</label>
-            <input type="password" name="currentMasterKey" autocomplete="off" placeholder="{{.T "system.masterKeyCurrentPlaceholder"}}" />
-          </div>
-          <div class="field" style="margin:0">
-            <label>{{.T "system.masterKeyPassword"}}</label>
-            <input type="password" name="password" autocomplete="current-password" placeholder="{{.T "system.masterKeyPasswordPlaceholder"}}" />
-          </div>
-          <div class="field" style="margin:0">
-            <label>{{.T "system.masterKeyNew"}}</label>
-            <input type="password" name="newMasterKey" autocomplete="new-password" placeholder="{{.T "system.masterKeyNewPlaceholder"}}" />
-          </div>
-          <div class="field" style="margin:0">
-            <label>{{.T "system.masterKeyConfirm"}}</label>
-            <input type="password" name="confirmNewMasterKey" autocomplete="new-password" placeholder="{{.T "system.masterKeyConfirmPlaceholder"}}" />
-          </div>
-        </div>
-        <div class="btn-row">
-          <button
-            class="btn danger"
-            type="submit"
-            data-confirm-submit="{{.T "system.masterKeyConfirmTitle"}}"
-            data-confirm-detail="{{.T "system.masterKeyConfirmDetail"}}"
-            data-confirm-ok="{{.T "system.masterKeyConfirmOk"}}"
-          >
-            {{.T "system.masterKeyRotate"}}
-          </button>
-        </div>
-      </form>
-    </div>
-
-    <div class="card">
-      <h3>{{.T "system.servicesTitle"}}</h3>
-      <div class="muted small">{{.T "system.servicesHint"}}</div>
-
-      <div class="grid cols-2" style="margin-top:12px;">
-        <div class="card" style="padding:14px;">
-          <h3 style="margin:0 0 6px;">Admin</h3>
-          <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Admin}}</code></div>
-          <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .AdminStatus)}}</div>
-          {{if and (eq .AdminStatus.Status "error") .AdminStatus.Error}}
-            <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.AdminStatus.Error}}</div>
-          {{end}}
-        </div>
-
-        <div class="card" style="padding:14px;">
-          <h3 style="margin:0 0 6px;">Torcherino</h3>
-          <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Torcherino}}</code></div>
-          <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .TorcherinoStatus)}}</div>
-          {{if and (eq .TorcherinoStatus.Status "error") .TorcherinoStatus.Error}}
-            <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.TorcherinoStatus.Error}}</div>
-          {{end}}
-        </div>
-
-        <div class="card" style="padding:14px;">
-          <h3 style="margin:0 0 6px;">{{.T "nav.cdnjs"}}</h3>
-          <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Cdnjs}}</code></div>
-          <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .CdnjsStatus)}}</div>
-          {{if and (eq .CdnjsStatus.Status "error") .CdnjsStatus.Error}}
-            <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.CdnjsStatus.Error}}</div>
-          {{end}}
-        </div>
-
-        <div class="card" style="padding:14px;">
-          <h3 style="margin:0 0 6px;">GitHub Raw</h3>
-          <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Git}}</code></div>
-          <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .GitStatus)}}</div>
-          {{if and (eq .GitStatus.Status "error") .GitStatus.Error}}
-            <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.GitStatus.Error}}</div>
-          {{end}}
-        </div>
-
-        <div class="card" style="padding:14px;">
-          <h3 style="margin:0 0 6px;">Sakuya</h3>
-          <div class="muted small">Oplist {{.T "common.port"}}：<code>{{.Ports.Sakuya}}</code></div>
-          <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .SakuyaOplistStatus)}}</div>
-          {{if and (eq .SakuyaOplistStatus.Status "error") .SakuyaOplistStatus.Error}}
-            <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.SakuyaOplistStatus.Error}}</div>
-          {{end}}
-        </div>
-
-        <div class="card" style="padding:14px;">
-          <h3 style="margin:0 0 6px;">{{.T "nav.patchouli"}}</h3>
-          <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Patchouli}}</code></div>
-          <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .PatchouliStatus)}}</div>
-          {{if and (eq .PatchouliStatus.Status "error") .PatchouliStatus.Error}}
-            <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.PatchouliStatus.Error}}</div>
-          {{end}}
         </div>
       </div>
     </div>
 
-    <div class="card">
-      <h3>{{.T "system.redisTitle"}}</h3>
+    <details class="card accordion hz-anchor" id="system-panel">
+      <summary>
+        <div class="hz-accordion-head">
+          <span>{{.T "system.timezoneTitle"}}</span>
+          <span class="muted small">{{.T "system.timezoneHint"}}</span>
+        </div>
+      </summary>
+      <div class="body">
+        <form method="post" action="/system/timezone" class="form">
+          <div class="field">
+            <label>{{.T "system.timezoneLabel"}}</label>
+            <input type="text" name="timeZone" value="{{.TimeZone}}" placeholder="{{.T "system.timezonePlaceholder"}}" />
+            <div class="hint">{{.T "system.timezoneHint2"}}</div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary" type="submit">{{.T "common.save"}}</button>
+          </div>
+        </form>
+      </div>
+    </details>
 
-      {{if eq .Redis.Status "ok"}}
-        <div class="pill ok">{{.T "redis.ok"}} · {{.Redis.LatencyMS}}ms · <code>{{.Redis.Addr}}</code></div>
-        <div class="kvs" style="margin-top:12px;">
-          <div class="muted">{{.T "system.redis.version"}}</div>
-          <div>{{if .Redis.ServerVersion}}<code>{{.Redis.ServerVersion}}</code>{{else}}-{{end}}</div>
-          <div class="muted">{{.T "system.redis.uptime"}}</div>
-          <div>{{if gt .Redis.UptimeSeconds 0}}<code>{{.Redis.UptimeSeconds}}</code> {{.T "system.seconds"}}{{else}}-{{end}}</div>
-          <div class="muted">{{.T "system.redis.clients"}}</div>
-          <div>{{if gt .Redis.ConnectedClients 0}}<code>{{.Redis.ConnectedClients}}</code>{{else}}-{{end}}</div>
-          <div class="muted">{{.T "system.redis.usedMemory"}}</div>
-          <div>{{if .Redis.UsedMemoryHuman}}<code>{{.Redis.UsedMemoryHuman}}</code>{{else}}-{{end}}</div>
-          <div class="muted">{{.T "system.redis.dbSize"}}</div>
-          <div><code>{{.Redis.DBSize}}</code> {{.T "system.redis.keys"}}</div>
+    <details class="card accordion hz-anchor" id="system-security">
+      <summary>
+        <div class="hz-accordion-head">
+          <span>{{.T "system.masterKeyTitle"}}</span>
+          <span class="muted small">{{.T "system.masterKeyHint"}}</span>
         </div>
-        <div class="btn-row" style="margin-top:12px;">
-          <a class="btn" href="/system/redis-cache">{{.T "system.redis.cacheManage"}}</a>
+      </summary>
+      <div class="body">
+        <div class="grid cols-2">
+          <div class="card">
+            <h3>{{.T "system.masterKeyVerifyTitle"}}</h3>
+            <div class="muted small">{{.T "system.masterKeyVerifyHint"}}</div>
+            <form method="post" action="/system/master-key/verify" class="form" style="margin-top:12px;">
+              <div class="grid cols-2">
+                <div class="field" style="margin:0">
+                  <label>{{.T "system.masterKeyCurrent"}}</label>
+                  <input type="password" name="currentMasterKey" autocomplete="off" placeholder="{{.T "system.masterKeyCurrentPlaceholder"}}" />
+                </div>
+                <div class="field" style="margin:0">
+                  <label>{{.T "system.masterKeyPassword"}}</label>
+                  <input type="password" name="password" autocomplete="current-password" placeholder="{{.T "system.masterKeyPasswordPlaceholder"}}" />
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn primary" type="submit">{{.T "system.masterKeyVerify"}}</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <h3>{{.T "system.masterKeyTitle"}}</h3>
+            <div class="muted small">{{.T "system.masterKeyHint"}}</div>
+            <form method="post" action="/system/master-key" class="form" style="margin-top:12px;">
+              <div class="grid cols-2">
+                <div class="field" style="margin:0">
+                  <label>{{.T "system.masterKeyCurrent"}}</label>
+                  <input type="password" name="currentMasterKey" autocomplete="off" placeholder="{{.T "system.masterKeyCurrentPlaceholder"}}" />
+                </div>
+                <div class="field" style="margin:0">
+                  <label>{{.T "system.masterKeyPassword"}}</label>
+                  <input type="password" name="password" autocomplete="current-password" placeholder="{{.T "system.masterKeyPasswordPlaceholder"}}" />
+                </div>
+                <div class="field" style="margin:0">
+                  <label>{{.T "system.masterKeyNew"}}</label>
+                  <input type="password" name="newMasterKey" autocomplete="new-password" placeholder="{{.T "system.masterKeyNewPlaceholder"}}" />
+                </div>
+                <div class="field" style="margin:0">
+                  <label>{{.T "system.masterKeyConfirm"}}</label>
+                  <input type="password" name="confirmNewMasterKey" autocomplete="new-password" placeholder="{{.T "system.masterKeyConfirmPlaceholder"}}" />
+                </div>
+              </div>
+              <div class="btn-row">
+                <button
+                  class="btn danger"
+                  type="submit"
+                  data-confirm-submit="{{.T "system.masterKeyConfirmTitle"}}"
+                  data-confirm-detail="{{.T "system.masterKeyConfirmDetail"}}"
+                  data-confirm-ok="{{.T "system.masterKeyConfirmOk"}}"
+                >
+                  {{.T "system.masterKeyRotate"}}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-      {{else if eq .Redis.Status "error"}}
-        <div class="pill err">{{.T "redis.error"}} · <code>{{.Redis.Addr}}</code></div>
-        {{if .Redis.Error}}<div class="muted small" style="margin-top:10px;">{{.T "common.errorPrefix"}}：{{.Redis.Error}}</div>{{end}}
-      {{else}}
-        <div class="pill">{{.T "redis.notConfigured"}}</div>
-      {{end}}
-    </div>
+      </div>
+    </details>
+
+    <details class="card accordion hz-anchor" id="system-health">
+      <summary>
+        <div class="hz-accordion-head">
+          <span>{{.T "system.servicesTitle"}}</span>
+          <span class="muted small">{{.T "system.servicesHint"}}</span>
+        </div>
+      </summary>
+      <div class="body">
+        <div class="grid cols-2">
+          <div class="card" style="padding:14px;">
+            <h3 style="margin:0 0 6px;">Admin</h3>
+            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Admin}}</code></div>
+            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .AdminStatus)}}</div>
+            {{if and (eq .AdminStatus.Status "error") .AdminStatus.Error}}
+              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.AdminStatus.Error}}</div>
+            {{end}}
+          </div>
+
+          <div class="card" style="padding:14px;">
+            <h3 style="margin:0 0 6px;">Torcherino</h3>
+            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Torcherino}}</code></div>
+            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .TorcherinoStatus)}}</div>
+            {{if and (eq .TorcherinoStatus.Status "error") .TorcherinoStatus.Error}}
+              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.TorcherinoStatus.Error}}</div>
+            {{end}}
+          </div>
+
+          <div class="card" style="padding:14px;">
+            <h3 style="margin:0 0 6px;">{{.T "nav.cdnjs"}}</h3>
+            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Cdnjs}}</code></div>
+            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .CdnjsStatus)}}</div>
+            {{if and (eq .CdnjsStatus.Status "error") .CdnjsStatus.Error}}
+              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.CdnjsStatus.Error}}</div>
+            {{end}}
+          </div>
+
+          <div class="card" style="padding:14px;">
+            <h3 style="margin:0 0 6px;">GitHub Raw</h3>
+            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Git}}</code></div>
+            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .GitStatus)}}</div>
+            {{if and (eq .GitStatus.Status "error") .GitStatus.Error}}
+              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.GitStatus.Error}}</div>
+            {{end}}
+          </div>
+
+          <div class="card" style="padding:14px;">
+            <h3 style="margin:0 0 6px;">Sakuya</h3>
+            <div class="muted small">Oplist {{.T "common.port"}}：<code>{{.Ports.Sakuya}}</code></div>
+            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .SakuyaOplistStatus)}}</div>
+            {{if and (eq .SakuyaOplistStatus.Status "error") .SakuyaOplistStatus.Error}}
+              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.SakuyaOplistStatus.Error}}</div>
+            {{end}}
+          </div>
+
+          <div class="card" style="padding:14px;">
+            <h3 style="margin:0 0 6px;">{{.T "nav.patchouli"}}</h3>
+            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Patchouli}}</code></div>
+            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .PatchouliStatus)}}</div>
+            {{if and (eq .PatchouliStatus.Status "error") .PatchouliStatus.Error}}
+              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.PatchouliStatus.Error}}</div>
+            {{end}}
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="card accordion hz-anchor" id="system-redis">
+      <summary>
+        <div class="hz-accordion-head">
+          <span>{{.T "system.redisTitle"}}</span>
+          <span class="muted small">{{.T "system.redis.cacheManage"}}</span>
+        </div>
+        <div class="hz-accordion-status">
+          {{if eq .Redis.Status "ok"}}
+            <span class="pill ok">{{.T "redis.ok"}} · {{.Redis.LatencyMS}}ms</span>
+          {{else if eq .Redis.Status "error"}}
+            <span class="pill err">{{.T "redis.error"}}</span>
+          {{else}}
+            <span class="pill">{{.T "redis.notConfigured"}}</span>
+          {{end}}
+        </div>
+      </summary>
+      <div class="body">
+        {{if eq .Redis.Status "ok"}}
+          <div class="pill ok">{{.T "redis.ok"}} · {{.Redis.LatencyMS}}ms · <code>{{.Redis.Addr}}</code></div>
+          <div class="kvs" style="margin-top:12px;">
+            <div class="muted">{{.T "system.redis.version"}}</div>
+            <div>{{if .Redis.ServerVersion}}<code>{{.Redis.ServerVersion}}</code>{{else}}-{{end}}</div>
+            <div class="muted">{{.T "system.redis.uptime"}}</div>
+            <div>{{if gt .Redis.UptimeSeconds 0}}<code>{{.Redis.UptimeSeconds}}</code> {{.T "system.seconds"}}{{else}}-{{end}}</div>
+            <div class="muted">{{.T "system.redis.clients"}}</div>
+            <div>{{if gt .Redis.ConnectedClients 0}}<code>{{.Redis.ConnectedClients}}</code>{{else}}-{{end}}</div>
+            <div class="muted">{{.T "system.redis.usedMemory"}}</div>
+            <div>{{if .Redis.UsedMemoryHuman}}<code>{{.Redis.UsedMemoryHuman}}</code>{{else}}-{{end}}</div>
+            <div class="muted">{{.T "system.redis.dbSize"}}</div>
+            <div><code>{{.Redis.DBSize}}</code> {{.T "system.redis.keys"}}</div>
+          </div>
+          <div class="btn-row" style="margin-top:12px;">
+            <a class="btn" href="/system/redis-cache">{{.T "system.redis.cacheManage"}}</a>
+          </div>
+        {{else if eq .Redis.Status "error"}}
+          <div class="pill err">{{.T "redis.error"}} · <code>{{.Redis.Addr}}</code></div>
+          {{if .Redis.Error}}<div class="muted small" style="margin-top:10px;">{{.T "common.errorPrefix"}}：{{.Redis.Error}}</div>{{end}}
+        {{else}}
+          <div class="pill">{{.T "redis.notConfigured"}}</div>
+        {{end}}
+      </div>
+    </details>
   </div>
 {{end}}

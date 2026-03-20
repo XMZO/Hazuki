@@ -1,6 +1,6 @@
 {{define "dashboard"}}
-  <div class="grid">
-    <div class="card">
+  <div class="grid hz-dashboard-page">
+    <div class="card hz-anchor" id="dashboard-overview">
       <h2>{{.Title}}</h2>
       <div class="muted small">{{.T "dashboard.configUpdatedAt"}}：<code data-hz-iso="{{.UpdatedAt}}">{{.UpdatedAt}}</code></div>
 
@@ -14,129 +14,199 @@
         <a class="btn" href="/config/versions">{{.T "nav.versions"}}</a>
         {{if .AdminURL}}<a class="btn" href="{{.AdminURL}}/_hazuki/health" target="_blank" rel="noreferrer">{{.T "dashboard.adminHealth"}}</a>{{end}}
       </div>
+
+      <div class="btn-row hz-page-jump">
+        <a class="btn" href="#dashboard-services">{{.T "system.servicesTitle"}}</a>
+        <a class="btn" href="#dashboard-traffic">{{.T "dashboard.trafficTitle"}}</a>
+        <a class="btn" href="#dashboard-redis">{{.T "dashboard.redisCacheTitle"}}</a>
+        {{if .Warnings}}<a class="btn" href="#dashboard-warnings">{{.T "dashboard.warningsTitle"}}</a>{{end}}
+      </div>
     </div>
 
-    <div class="grid cols-2">
-      <div class="card">
-        <h3>Torcherino</h3>
-        <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Torcherino}}</code></div>
-        <div class="muted small" style="margin-top:8px;">{{.T "common.address"}}：<code>{{.TorcherinoURL}}</code></div>
-        {{if .TorcherinoStatus.Status}}
-          <div style="margin-top:8px;">
-            {{template "serviceStatusPill" (statusCtx $ .TorcherinoStatus)}}
-            {{if and (eq .TorcherinoStatus.Status "error") .TorcherinoStatus.Error}}
-              <span class="muted small" style="margin-left:8px;">{{.TorcherinoStatus.Error}}</span>
-            {{end}}
-          </div>
-        {{end}}
-        <div class="btn-row">
-          <a class="btn" href="/config/torcherino">{{.T "common.configure"}}</a>
-          <a class="btn" href="{{.TorcherinoURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
-          <a class="btn" href="{{.TorcherinoHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
+    <details class="card accordion hz-anchor" id="dashboard-services" open>
+      <summary>
+        <div class="hz-accordion-head">
+          <span>{{.T "system.servicesTitle"}}</span>
+          <span class="muted small">{{.T "system.servicesHint"}}</span>
         </div>
-      </div>
-
-      <div class="card">
-        <h3>{{.T "nav.cdnjs"}}</h3>
-        <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Cdnjs}}</code></div>
-        <div class="muted small" style="margin-top:8px;">{{.T "common.address"}}：<code>{{.CdnjsURL}}</code></div>
-        {{if .CdnjsStatus.Status}}
-          <div style="margin-top:8px;">
-            {{template "serviceStatusPill" (statusCtx $ .CdnjsStatus)}}
-            {{if and (eq .CdnjsStatus.Status "error") .CdnjsStatus.Error}}
-              <span class="muted small" style="margin-left:8px;">{{.CdnjsStatus.Error}}</span>
-            {{end}}
-          </div>
-        {{end}}
-        {{if .CdnjsRedis.Status}}
-          {{if eq .CdnjsRedis.Status "ok"}}
-            <div style="margin-top:8px;"><span class="pill ok">{{.T "redis.ok"}} · {{.CdnjsRedis.LatencyMS}}ms · {{.CdnjsRedis.Addr}}</span></div>
-          {{else if eq .CdnjsRedis.Status "error"}}
-            <div style="margin-top:8px;"><span class="pill err">{{.T "redis.error"}} · {{.CdnjsRedis.Addr}}</span></div>
-          {{else}}
-            <div style="margin-top:8px;"><span class="pill">{{.T "redis.notConfigured"}}</span></div>
-          {{end}}
-        {{end}}
-        <div class="btn-row">
-          <a class="btn" href="/config/cdnjs">{{.T "common.configure"}}</a>
-          <a class="btn" href="{{.CdnjsURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
-          <a class="btn" href="{{.CdnjsHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
+      </summary>
+      <div class="body">
+        <div class="table-wrap">
+          <table class="table" aria-label="{{.T "system.servicesTitle"}}">
+            <thead>
+              <tr>
+                <th>{{.T "dashboard.traffic.service"}}</th>
+                <th>{{.T "common.port"}}</th>
+                <th>{{.T "common.address"}}</th>
+                <th>{{.T "common.status"}}</th>
+                <th>{{.T "common.actions"}}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Admin</td>
+                <td><code>{{.Ports.Admin}}</code></td>
+                <td>{{if .AdminURL}}<code>{{.AdminURL}}</code>{{else}}-{{end}}</td>
+                <td>
+                  {{template "serviceStatusPill" (statusCtx $ .AdminStatus)}}
+                  {{if and (eq .AdminStatus.Status "error") .AdminStatus.Error}}
+                    <div class="muted small" style="margin-top:6px;">{{.AdminStatus.Error}}</div>
+                  {{end}}
+                </td>
+                <td>
+                  <div class="btn-row" style="margin-top:0;">
+                    {{if .AdminURL}}<a class="btn" href="{{.AdminURL}}/_hazuki/health" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>{{end}}
+                    <a class="btn" href="/system">{{.T "nav.system"}}</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>Torcherino</td>
+                <td><code>{{.Ports.Torcherino}}</code></td>
+                <td><code>{{.TorcherinoURL}}</code></td>
+                <td>
+                  {{template "serviceStatusPill" (statusCtx $ .TorcherinoStatus)}}
+                  {{if and (eq .TorcherinoStatus.Status "error") .TorcherinoStatus.Error}}
+                    <div class="muted small" style="margin-top:6px;">{{.TorcherinoStatus.Error}}</div>
+                  {{end}}
+                </td>
+                <td>
+                  <div class="btn-row" style="margin-top:0;">
+                    <a class="btn" href="/config/torcherino">{{.T "common.configure"}}</a>
+                    <a class="btn" href="{{.TorcherinoURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
+                    <a class="btn" href="{{.TorcherinoHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>{{.T "nav.cdnjs"}}</td>
+                <td><code>{{.Ports.Cdnjs}}</code></td>
+                <td><code>{{.CdnjsURL}}</code></td>
+                <td>
+                  {{template "serviceStatusPill" (statusCtx $ .CdnjsStatus)}}
+                  {{if and (eq .CdnjsStatus.Status "error") .CdnjsStatus.Error}}
+                    <div class="muted small" style="margin-top:6px;">{{.CdnjsStatus.Error}}</div>
+                  {{end}}
+                  {{if .CdnjsRedis.Status}}
+                    <div style="margin-top:6px;">
+                      {{if eq .CdnjsRedis.Status "ok"}}
+                        <span class="pill ok">{{.T "redis.ok"}} · {{.CdnjsRedis.LatencyMS}}ms</span>
+                      {{else if eq .CdnjsRedis.Status "error"}}
+                        <span class="pill err">{{.T "redis.error"}}</span>
+                      {{else}}
+                        <span class="pill">{{.T "redis.notConfigured"}}</span>
+                      {{end}}
+                    </div>
+                  {{end}}
+                </td>
+                <td>
+                  <div class="btn-row" style="margin-top:0;">
+                    <a class="btn" href="/config/cdnjs">{{.T "common.configure"}}</a>
+                    <a class="btn" href="{{.CdnjsURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
+                    <a class="btn" href="{{.CdnjsHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>GitHub Raw</td>
+                <td><code>{{.Ports.Git}}</code></td>
+                <td><code>{{.GitURL}}</code></td>
+                <td>
+                  {{template "serviceStatusPill" (statusCtx $ .GitStatus)}}
+                  {{if and (eq .GitStatus.Status "error") .GitStatus.Error}}
+                    <div class="muted small" style="margin-top:6px;">{{.GitStatus.Error}}</div>
+                  {{end}}
+                </td>
+                <td>
+                  <div class="btn-row" style="margin-top:0;">
+                    <a class="btn" href="/config/git">{{.T "common.configure"}}</a>
+                    <a class="btn" href="{{.GitURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
+                    <a class="btn" href="{{.GitHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>{{.T "nav.sakuya"}}</td>
+                <td><code>{{.Ports.Sakuya}}</code></td>
+                <td><code>{{.SakuyaURL}}</code></td>
+                <td>
+                  {{template "serviceStatusPill" (statusCtx $ .SakuyaStatus)}}
+                  {{if and (eq .SakuyaStatus.Status "error") .SakuyaStatus.Error}}
+                    <div class="muted small" style="margin-top:6px;">{{.SakuyaStatus.Error}}</div>
+                  {{end}}
+                </td>
+                <td>
+                  <div class="btn-row" style="margin-top:0;">
+                    <a class="btn" href="/config/sakuya/oplist">{{.T "common.configure"}}</a>
+                    <a class="btn" href="{{.SakuyaURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
+                    <a class="btn" href="{{.SakuyaHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>{{.T "nav.patchouli"}}</td>
+                <td><code>{{if .Ports.Patchouli}}{{.Ports.Patchouli}}{{else}}3201{{end}}</code></td>
+                <td><code>{{.PatchouliURL}}</code></td>
+                <td>
+                  {{template "serviceStatusPill" (statusCtx $ .PatchouliStatus)}}
+                  {{if and (eq .PatchouliStatus.Status "error") .PatchouliStatus.Error}}
+                    <div class="muted small" style="margin-top:6px;">{{.PatchouliStatus.Error}}</div>
+                  {{end}}
+                </td>
+                <td>
+                  <div class="btn-row" style="margin-top:0;">
+                    <a class="btn" href="/config/patchouli">{{.T "common.configure"}}</a>
+                    <a class="btn" href="{{.PatchouliURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
+                    <a class="btn" href="{{.PatchouliHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-      </div>
 
-      <div class="card">
-        <h3>GitHub Raw</h3>
-        <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Git}}</code></div>
-        <div class="muted small" style="margin-top:8px;">{{.T "common.address"}}：<code>{{.GitURL}}</code></div>
-        {{if .GitStatus.Status}}
-          <div style="margin-top:8px;">
-            {{template "serviceStatusPill" (statusCtx $ .GitStatus)}}
-            {{if and (eq .GitStatus.Status "error") .GitStatus.Error}}
-              <span class="muted small" style="margin-left:8px;">{{.GitStatus.Error}}</span>
-            {{end}}
-          </div>
-        {{end}}
         {{if .GitInstances}}
-          <div class="muted small" style="margin-top:10px;">{{.T "dashboard.extraInstances"}}：</div>
-          <div style="margin-top:8px; display:grid; gap:8px;">
-            {{range .GitInstances}}
-              <div class="btn-row" style="margin-top:0;">
-                <span class="pill"><code>{{.ID}}</code> · <code>{{.Port}}</code></span>
-                {{template "serviceStatusPill" (statusCtx $ .Status)}}
-                <a class="btn" href="/config/git?instance={{.ID}}">{{$.T "common.configure"}}</a>
-                <a class="btn" href="{{.HealthURL}}" target="_blank" rel="noreferrer">{{$.T "common.health"}}</a>
+          <details class="accordion" style="margin-top:12px;">
+            <summary>{{.T "dashboard.extraInstances"}}</summary>
+            <div class="body">
+              <div class="table-wrap">
+                <table class="table" aria-label="{{.T "dashboard.extraInstances"}}">
+                  <thead>
+                    <tr>
+                      <th>{{.T "common.name"}}</th>
+                      <th>{{.T "common.id"}}</th>
+                      <th>{{.T "common.port"}}</th>
+                      <th>{{.T "common.status"}}</th>
+                      <th>{{.T "common.actions"}}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {{range .GitInstances}}
+                      <tr>
+                        <td>{{.Name}}</td>
+                        <td><code>{{.ID}}</code></td>
+                        <td><code>{{.Port}}</code></td>
+                        <td>{{template "serviceStatusPill" (statusCtx $ .Status)}}</td>
+                        <td>
+                          <div class="btn-row" style="margin-top:0;">
+                            <a class="btn" href="/config/git?instance={{.ID}}">{{$.T "common.configure"}}</a>
+                            <a class="btn" href="{{.BaseURL}}" target="_blank" rel="noreferrer">{{$.T "common.open"}}</a>
+                            <a class="btn" href="{{.HealthURL}}" target="_blank" rel="noreferrer">{{$.T "common.health"}}</a>
+                          </div>
+                        </td>
+                      </tr>
+                    {{end}}
+                  </tbody>
+                </table>
               </div>
-            {{end}}
-          </div>
+            </div>
+          </details>
         {{end}}
-        <div class="btn-row">
-          <a class="btn" href="/config/git">{{.T "common.configure"}}</a>
-          <a class="btn" href="{{.GitURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
-          <a class="btn" href="{{.GitHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
-        </div>
       </div>
-
-      <div class="card">
-        <h3>{{.T "nav.sakuya"}}</h3>
-        <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Sakuya}}</code></div>
-        <div class="muted small" style="margin-top:8px;">{{.T "common.address"}}：<code>{{.SakuyaURL}}</code></div>
-        {{if .SakuyaStatus.Status}}
-          <div style="margin-top:8px;">
-            {{template "serviceStatusPill" (statusCtx $ .SakuyaStatus)}}
-            {{if and (eq .SakuyaStatus.Status "error") .SakuyaStatus.Error}}
-              <span class="muted small" style="margin-left:8px;">{{.SakuyaStatus.Error}}</span>
-            {{end}}
-          </div>
-        {{end}}
-        <div class="btn-row">
-          <a class="btn" href="/config/sakuya/oplist">{{.T "common.configure"}}</a>
-          <a class="btn" href="{{.SakuyaURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
-          <a class="btn" href="{{.SakuyaHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>{{.T "nav.patchouli"}}</h3>
-        <div class="muted small">{{.T "common.port"}}：<code>{{if .Ports.Patchouli}}{{.Ports.Patchouli}}{{else}}3201{{end}}</code></div>
-        <div class="muted small" style="margin-top:8px;">{{.T "common.address"}}：<code>{{.PatchouliURL}}</code></div>
-        {{if .PatchouliStatus.Status}}
-          <div style="margin-top:8px;">
-            {{template "serviceStatusPill" (statusCtx $ .PatchouliStatus)}}
-            {{if and (eq .PatchouliStatus.Status "error") .PatchouliStatus.Error}}
-              <span class="muted small" style="margin-left:8px;">{{.PatchouliStatus.Error}}</span>
-            {{end}}
-          </div>
-        {{end}}
-        <div class="btn-row">
-          <a class="btn" href="/config/patchouli">{{.T "common.configure"}}</a>
-          <a class="btn" href="{{.PatchouliURL}}" target="_blank" rel="noreferrer">{{.T "common.open"}}</a>
-          <a class="btn" href="{{.PatchouliHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.health"}}</a>
-        </div>
-      </div>
-    </div>
+    </details>
 
     <div class="grid cols-2">
-      <div class="card" id="hz-traffic-card">
+      <div class="card hz-anchor" id="dashboard-traffic">
         <h3>{{.T "dashboard.trafficTitle"}}</h3>
         <div class="muted small">{{.T "dashboard.trafficHint"}}</div>
 
@@ -199,7 +269,7 @@
         </div>
       </div>
 
-      <div class="card" id="hz-redis-card">
+      <div class="card hz-anchor" id="dashboard-redis">
         <h3>{{.T "dashboard.redisCacheTitle"}}</h3>
         <div class="muted small">{{.T "dashboard.redisCacheHint"}}</div>
         <div style="margin-top:10px;">
@@ -222,15 +292,24 @@
     </div>
 
     {{if .Warnings}}
-      <div class="card">
-        <h3>{{.T "dashboard.warningsTitle"}}</h3>
-        <div class="muted small">{{.T "dashboard.warningsHint"}}</div>
-        <ul style="margin:10px 0 0; padding-left: 18px;">
-          {{range .Warnings}}
-            <li style="margin:6px 0;">{{.}}</li>
-          {{end}}
-        </ul>
-      </div>
+      <details class="card accordion hz-anchor" id="dashboard-warnings">
+        <summary>
+          <div class="hz-accordion-head">
+            <span>{{.T "dashboard.warningsTitle"}}</span>
+            <span class="muted small">{{.T "dashboard.warningsHint"}}</span>
+          </div>
+          <div class="hz-accordion-status">
+            <span class="pill err"><code>{{len .Warnings}}</code></span>
+          </div>
+        </summary>
+        <div class="body">
+          <ul style="margin:10px 0 0; padding-left: 18px;">
+            {{range .Warnings}}
+              <li style="margin:6px 0;">{{.}}</li>
+            {{end}}
+          </ul>
+        </div>
+      </details>
     {{end}}
   </div>
 {{end}}
