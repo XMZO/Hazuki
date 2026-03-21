@@ -146,6 +146,7 @@ type AdmissionAutoTuneReport struct {
 	Enabled                  bool
 	Interval                 time.Duration
 	MinTraceSamples          int
+	Run                      bool
 	TraceSamples             int
 	ObservationSamples       int
 	Recommended              bool
@@ -318,10 +319,38 @@ func (t *runtimeTraceTuner) ResetAdmissionModel(intercept, slope float64) runtim
 	return snap
 }
 
+func RestoreAdmissionAutoTuneActiveModel(intercept, slope float64, promotedAt time.Time) {
+	adaptiveAutoTuneMu.Lock()
+	defer adaptiveAutoTuneMu.Unlock()
+
+	intercept = clampFloat64(intercept, 0.16, 0.38)
+	slope = clampFloat64(slope, -0.30, 0.08)
+	snap := adaptiveTraceTunerState.ResetAdmissionModel(intercept, slope)
+
+	state := currentAdmissionAutoTuneState()
+	state.ActiveAdmissionIntercept = intercept
+	state.ActiveAdmissionSlope = slope
+	if !promotedAt.IsZero() {
+		state.LastPromotedAt = promotedAt.UTC()
+	}
+	state.Reason = "persisted"
+	adaptiveAutoTuneSnapshot.Store(state)
+
+	status := CurrentMemoryStatus()
+	pressure := clampFloat64(RuntimePressureIndex(status)/3, 0, 1)
+	applyAdaptiveTraceStatus(snap, predictiveUtilizationRatio(status), learnedAdmissionShare(status, pressure))
+}
+
+func HasAdmissionModelEnvOverride() bool {
+	_, _, configured := runtimeAdmissionModelFromEnvDetailed()
+	return configured
+}
+
 func ReportAdmissionAutoTune(report AdmissionAutoTuneReport) {
 	adaptiveAutoTuneMu.Lock()
 	defer adaptiveAutoTuneMu.Unlock()
 
+	now := time.Now().UTC()
 	state := currentAdmissionAutoTuneState()
 	state.Enabled = report.Enabled
 	if report.Interval > 0 {
@@ -339,7 +368,9 @@ func ReportAdmissionAutoTune(report AdmissionAutoTuneReport) {
 	if strings.TrimSpace(report.Reason) != "" {
 		state.Reason = strings.TrimSpace(report.Reason)
 	}
-	state.LastRunAt = time.Now().UTC()
+	if report.Run {
+		state.LastRunAt = now
+	}
 
 	if report.Promote {
 		intercept := clampFloat64(report.CandidateIntercept, 0.16, 0.38)
@@ -347,7 +378,10 @@ func ReportAdmissionAutoTune(report AdmissionAutoTuneReport) {
 		snap := adaptiveTraceTunerState.ResetAdmissionModel(intercept, slope)
 		state.ActiveAdmissionIntercept = intercept
 		state.ActiveAdmissionSlope = slope
-		state.LastPromotedAt = state.LastRunAt
+		if state.LastRunAt.IsZero() {
+			state.LastRunAt = now
+		}
+		state.LastPromotedAt = now
 
 		status := CurrentMemoryStatus()
 		pressure := clampFloat64(RuntimePressureIndex(status)/3, 0, 1)
@@ -957,16 +991,24 @@ func runtimeGCPercentFromEnv() (int, bool, bool) {
 }
 
 func runtimeAdmissionModelFromEnv() (float64, float64) {
+	intercept, slope, _ := runtimeAdmissionModelFromEnvDetailed()
+	return intercept, slope
+}
+
+func runtimeAdmissionModelFromEnvDetailed() (float64, float64, bool) {
 	intercept := defaultAdmissionIntercept
 	slope := defaultAdmissionSlope
+	configured := false
 
 	if value, ok := runtimeFloat64FromEnv("HAZUKI_REWRITE_ADMISSION_INTERCEPT"); ok {
 		intercept = clampFloat64(value, 0.16, 0.38)
+		configured = true
 	}
 	if value, ok := runtimeFloat64FromEnv("HAZUKI_REWRITE_ADMISSION_SLOPE"); ok {
 		slope = clampFloat64(value, -0.30, 0.08)
+		configured = true
 	}
-	return intercept, slope
+	return intercept, slope, configured
 }
 
 func runtimeFloat64FromEnv(key string) (float64, bool) {

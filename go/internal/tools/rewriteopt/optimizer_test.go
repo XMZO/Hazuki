@@ -36,6 +36,29 @@ func TestOptimizeRecoversTraceDrivenLinearPolicy(t *testing.T) {
 	}
 }
 
+func TestOptimizeRecoversTraceDrivenLinearPolicyLeanRuntimeBudget(t *testing.T) {
+	t.Parallel()
+
+	result := Optimize(buildStableTrace(
+		128,
+		Candidate{AdmissionIntercept: 0.24, AdmissionSlope: -0.04},
+		[]int64{512 << 20, 3 << 30},
+	), DefaultCandidate(), 24)
+
+	if result.BestScore.Total >= result.BaselineScore.Total {
+		t.Fatalf("expected optimizer to improve training score, baseline=%f best=%f", result.BaselineScore.Total, result.BestScore.Total)
+	}
+	if !result.Gate.Recommended {
+		t.Fatalf("expected lean runtime budget to still pass validation gate, got %q", result.Gate.Reason)
+	}
+	if math.Abs(result.Best.AdmissionIntercept-0.24) > 0.04 {
+		t.Fatalf("expected intercept near 0.240, got %.3f", result.Best.AdmissionIntercept)
+	}
+	if math.Abs(result.Best.AdmissionSlope-(-0.04)) > 0.06 {
+		t.Fatalf("expected slope near -0.040, got %.3f", result.Best.AdmissionSlope)
+	}
+}
+
 func TestOptimizeRejectsValidationDrift(t *testing.T) {
 	t.Parallel()
 
@@ -51,6 +74,21 @@ func TestOptimizeRejectsValidationDrift(t *testing.T) {
 	}
 	if result.Validation.Candidate.Total < result.Validation.Baseline.Total {
 		t.Fatalf("expected challenger to be no better on validation drift, candidate=%f baseline=%f", result.Validation.Candidate.Total, result.Validation.Baseline.Total)
+	}
+}
+
+func TestOptimizeRejectsValidationDriftLeanRuntimeBudget(t *testing.T) {
+	t.Parallel()
+
+	trace := buildDriftTrace(
+		128,
+		Candidate{AdmissionIntercept: 0.22, AdmissionSlope: -0.01},
+		DefaultCandidate(),
+		[]int64{512 << 20, 3 << 30},
+	)
+	result := Optimize(trace, DefaultCandidate(), 24)
+	if result.Gate.Recommended {
+		t.Fatalf("expected lean runtime budget to fail validation gate on drift")
 	}
 }
 

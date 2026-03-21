@@ -245,3 +245,34 @@ func TestReportAdmissionAutoTunePromotesLiveModel(t *testing.T) {
 		t.Fatalf("expected promoted timestamp to be recorded")
 	}
 }
+
+func TestReportAdmissionAutoTuneConfigOnlyDoesNotMarkRun(t *testing.T) {
+	t.Parallel()
+
+	adaptiveAutoTuneSnapshot.Store(admissionAutoTuneState{
+		Reason:                   "persisted",
+		ActiveAdmissionIntercept: 0.22,
+		ActiveAdmissionSlope:     -0.06,
+	})
+
+	ReportAdmissionAutoTune(AdmissionAutoTuneReport{
+		Enabled:         true,
+		Interval:        10 * time.Minute,
+		MinTraceSamples: 180,
+		Reason:          "persisted",
+	})
+
+	status := CurrentRuntimeModelStatus()
+	if !status.AutoTuneEnabled {
+		t.Fatalf("expected auto tune to stay enabled")
+	}
+	if status.AutoTuneReason != "persisted" {
+		t.Fatalf("expected persisted reason, got %q", status.AutoTuneReason)
+	}
+	if !status.AutoTuneLastRunAt.IsZero() {
+		t.Fatalf("expected config-only report to leave last run empty, got %s", status.AutoTuneLastRunAt.Format(time.RFC3339))
+	}
+	if status.ActiveAdmissionIntercept != 0.22 || status.ActiveAdmissionSlope != -0.06 {
+		t.Fatalf("expected active model to stay unchanged, got intercept=%.3f slope=%.3f", status.ActiveAdmissionIntercept, status.ActiveAdmissionSlope)
+	}
+}

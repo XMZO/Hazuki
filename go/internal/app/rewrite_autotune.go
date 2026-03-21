@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"log"
 	"os"
 	"strings"
 	"time"
 
 	"hazuki-go/internal/proxy/rewritebudget"
+	"hazuki-go/internal/storage"
 	"hazuki-go/internal/tools/rewriteopt"
 )
 
@@ -14,20 +17,51 @@ const (
 	defaultRewriteAutoTuneInterval        = 10 * time.Minute
 	defaultRewriteAutoTuneInitialDelay    = 2 * time.Minute
 	defaultRewriteAutoTuneMinTraceSamples = 180
-	defaultRewriteAutoTuneIterations      = 48
+	defaultRewriteAutoTuneMaxTraceSamples = 256
+	defaultRewriteAutoTuneIterations      = 24
+	smallRewriteAutoTuneMemoryBudgetBytes = 768 << 20
+	smallRewriteAutoTuneMaxTraceSamples   = 192
+	smallRewriteAutoTuneIterations        = 16
+	rewriteAutoTuneSkipPressureMilli      = 550
 )
 
-func startRewriteAutoTune(ctx context.Context) {
+func restoreRewriteAutoTuneModel(ctx context.Context, db *sql.DB) {
+	if db == nil || rewritebudget.HasAdmissionModelEnvOverride() {
+		return
+	}
+
+	model, ok, err := storage.GetRewriteAutoTuneActiveModel(ctx, db)
+	if err != nil {
+		log.Printf("rewrite_autotune: restore persisted model failed: %v", err)
+		return
+	}
+	if !ok {
+		return
+	}
+
+	rewritebudget.RestoreAdmissionAutoTuneActiveModel(model.AdmissionIntercept, model.AdmissionSlope, model.PromotedAt)
+	log.Printf("rewrite_autotune: restored active model intercept=%.4f slope=%.4f promoted_at=%s", model.AdmissionIntercept, model.AdmissionSlope, model.PromotedAt.UTC().Format(time.RFC3339))
+}
+
+func startRewriteAutoTune(ctx context.Context, db *sql.DB) {
 	enabled := parseBoolDefault(os.Getenv("HAZUKI_REWRITE_AUTOTUNE"), true)
 	interval := parseDurationDefault(os.Getenv("HAZUKI_REWRITE_AUTOTUNE_INTERVAL"), defaultRewriteAutoTuneInterval)
 	minTraceSamples := parsePositiveInt(os.Getenv("HAZUKI_REWRITE_AUTOTUNE_MIN_TRACE_SAMPLES"), defaultRewriteAutoTuneMinTraceSamples)
+	maxTraceSamples := parsePositiveInt(os.Getenv("HAZUKI_REWRITE_AUTOTUNE_MAX_TRACE_SAMPLES"), defaultRewriteAutoTuneMaxTraceSamples)
 	iterations := parsePositiveInt(os.Getenv("HAZUKI_REWRITE_AUTOTUNE_ITERATIONS"), defaultRewriteAutoTuneIterations)
+	if maxTraceSamples < minTraceSamples {
+		maxTraceSamples = minTraceSamples
+	}
+	reason := "warming_up"
+	if rewritebudget.CurrentRuntimeModelStatus().AutoTuneReason == "persisted" {
+		reason = "persisted"
+	}
 
 	rewritebudget.ReportAdmissionAutoTune(rewritebudget.AdmissionAutoTuneReport{
 		Enabled:         enabled,
 		Interval:        interval,
 		MinTraceSamples: minTraceSamples,
-		Reason:          "warming_up",
+		Reason:          reason,
 	})
 	if !enabled {
 		rewritebudget.ReportAdmissionAutoTune(rewritebudget.AdmissionAutoTuneReport{
@@ -39,10 +73,10 @@ func startRewriteAutoTune(ctx context.Context) {
 		return
 	}
 
-	go runRewriteAutoTuneLoop(ctx, interval, minTraceSamples, iterations)
+	go runRewriteAutoTuneLoop(ctx, db, interval, minTraceSamples, maxTraceSamples, iterations)
 }
 
-func runRewriteAutoTuneLoop(ctx context.Context, interval time.Duration, minTraceSamples, iterations int) {
+func runRewriteAutoTuneLoop(ctx context.Context, db *sql.DB, interval time.Duration, minTraceSamples, maxTraceSamples, iterations int) {
 	initialDelay := minDuration(defaultRewriteAutoTuneInitialDelay, interval)
 	if initialDelay <= 0 {
 		initialDelay = time.Minute
@@ -56,14 +90,19 @@ func runRewriteAutoTuneLoop(ctx context.Context, interval time.Duration, minTrac
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			runRewriteAutoTune(interval, minTraceSamples, iterations)
+			runRewriteAutoTune(ctx, db, interval, minTraceSamples, maxTraceSamples, iterations)
 			timer.Reset(interval)
 		}
 	}
 }
 
-func runRewriteAutoTune(interval time.Duration, minTraceSamples, iterations int) {
+func runRewriteAutoTune(ctx context.Context, db *sql.DB, interval time.Duration, minTraceSamples, maxTraceSamples, iterations int) {
+	maxTraceSamples, iterations = runtimeRewriteAutoTuneBudget(maxTraceSamples, iterations)
+
 	trace := rewritebudget.ExportRuntimeTrace()
+	if maxTraceSamples > 0 && len(trace) > maxTraceSamples {
+		trace = trace[len(trace)-maxTraceSamples:]
+	}
 	traceSamples := len(trace)
 	observationSamples := 0
 	if traceSamples > 0 {
@@ -75,9 +114,23 @@ func runRewriteAutoTune(interval time.Duration, minTraceSamples, iterations int)
 			Enabled:            true,
 			Interval:           interval,
 			MinTraceSamples:    minTraceSamples,
+			Run:                true,
 			TraceSamples:       traceSamples,
 			ObservationSamples: observationSamples,
 			Reason:             "warming_up",
+		})
+		return
+	}
+
+	if reason, skip := shouldSkipRewriteAutoTune(); skip {
+		rewritebudget.ReportAdmissionAutoTune(rewritebudget.AdmissionAutoTuneReport{
+			Enabled:            true,
+			Interval:           interval,
+			MinTraceSamples:    minTraceSamples,
+			Run:                true,
+			TraceSamples:       traceSamples,
+			ObservationSamples: observationSamples,
+			Reason:             reason,
 		})
 		return
 	}
@@ -94,6 +147,7 @@ func runRewriteAutoTune(interval time.Duration, minTraceSamples, iterations int)
 		Enabled:                  true,
 		Interval:                 interval,
 		MinTraceSamples:          minTraceSamples,
+		Run:                      true,
 		TraceSamples:             traceSamples,
 		ObservationSamples:       result.Observations,
 		Recommended:              result.Gate.Recommended,
@@ -107,7 +161,16 @@ func runRewriteAutoTune(interval time.Duration, minTraceSamples, iterations int)
 
 	if result.Gate.Recommended {
 		if hasMaterialCandidateDelta(baseline, result.Best) {
+			if err := storage.SetRewriteAutoTuneActiveModel(ctx, db, storage.RewriteAutoTuneActiveModel{
+				AdmissionIntercept: result.Best.AdmissionIntercept,
+				AdmissionSlope:     result.Best.AdmissionSlope,
+				PromotedAt:         time.Now().UTC(),
+			}); err != nil {
+				log.Printf("rewrite_autotune: persist promoted model failed: %v", err)
+				report.Reason = "promote_memory_only"
+			}
 			report.Promote = true
+			log.Printf("rewrite_autotune: promoted active model intercept=%.4f slope=%.4f train=%.2f%% validation=%.2f%%", result.Best.AdmissionIntercept, result.Best.AdmissionSlope, result.Gate.TrainImprovementPct, result.Gate.ValidationImprovementPct)
 		} else {
 			report.Recommended = false
 			report.Reason = "no_material_change"
@@ -115,6 +178,45 @@ func runRewriteAutoTune(interval time.Duration, minTraceSamples, iterations int)
 	}
 
 	rewritebudget.ReportAdmissionAutoTune(report)
+}
+
+func shouldSkipRewriteAutoTune() (string, bool) {
+	status := rewritebudget.CurrentMemoryStatus()
+	governor := rewritebudget.CurrentGovernorStatus()
+
+	if governor.Mode == "guarded" || governor.Mode == "emergency" {
+		return "busy", true
+	}
+	if governor.PressureMilli >= rewriteAutoTuneSkipPressureMilli {
+		return "busy", true
+	}
+	if status.CgroupMaxEvents > 0 || status.CgroupOOMEvents > 0 || status.CgroupOOMKillEvents > 0 {
+		return "busy", true
+	}
+	if rewritebudget.RuntimePressureIndex(status) >= 1.15 {
+		return "busy", true
+	}
+	return "", false
+}
+
+func runtimeRewriteAutoTuneBudget(maxTraceSamples, iterations int) (int, int) {
+	if maxTraceSamples <= 0 {
+		maxTraceSamples = defaultRewriteAutoTuneMaxTraceSamples
+	}
+	if iterations <= 0 {
+		iterations = defaultRewriteAutoTuneIterations
+	}
+
+	status := rewritebudget.CurrentMemoryStatus()
+	if status.MemoryBudgetBytes > 0 && status.MemoryBudgetBytes <= smallRewriteAutoTuneMemoryBudgetBytes {
+		if maxTraceSamples > smallRewriteAutoTuneMaxTraceSamples {
+			maxTraceSamples = smallRewriteAutoTuneMaxTraceSamples
+		}
+		if iterations > smallRewriteAutoTuneIterations {
+			iterations = smallRewriteAutoTuneIterations
+		}
+	}
+	return maxTraceSamples, iterations
 }
 
 func hasMaterialCandidateDelta(current, next rewriteopt.Candidate) bool {

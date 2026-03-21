@@ -427,8 +427,14 @@ func localizeAutoTuneReason(s *server, r *http.Request, reason string) string {
 		return s.t(r, "system.rewriteRuntime.autoTune.reason.warming")
 	case "promote":
 		return s.t(r, "system.rewriteRuntime.autoTune.reason.promote")
+	case "persisted":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.persisted")
 	case "no_material_change":
 		return s.t(r, "system.rewriteRuntime.autoTune.reason.steady")
+	case "busy":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.busy")
+	case "promote_memory_only":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.memoryOnly")
 	case "validation_improvement_too_small":
 		return s.t(r, "system.rewriteRuntime.autoTune.reason.waiting")
 	case "validation_risk_regressed":

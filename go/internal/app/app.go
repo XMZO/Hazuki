@@ -22,9 +22,6 @@ func Run(ctx context.Context) error {
 	if _, err := os.Stat("go.mod"); err == nil {
 		_ = godotenv.Load(".env")
 	}
-	rewritebudget.ApplyRuntimeEnv()
-	rewritebudget.StartAdaptiveGCController(ctx)
-	startRewriteAutoTune(ctx)
 
 	dbPath := strings.TrimSpace(os.Getenv("HAZUKI_DB_PATH"))
 	if dbPath == "" {
@@ -41,6 +38,10 @@ func Run(ctx context.Context) error {
 	if err := storage.Migrate(db); err != nil {
 		return err
 	}
+
+	rewritebudget.ApplyRuntimeEnv()
+	restoreRewriteAutoTuneModel(ctx, db)
+	rewritebudget.StartAdaptiveGCController(ctx)
 
 	cryptoContext, err := storage.NewCryptoContext(db, masterKey)
 	if err != nil {
@@ -67,6 +68,7 @@ func Run(ctx context.Context) error {
 		sessionTTL: sessionTTL,
 		metrics:    metrics.NewRegistry(),
 	}
+	startRewriteAutoTune(ctx, db)
 
 	fatalErrCh := make(chan error, 1)
 	modules := []module{
