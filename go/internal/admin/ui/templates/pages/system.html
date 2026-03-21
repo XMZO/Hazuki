@@ -67,6 +67,9 @@
             <h3>{{.T "system.rewriteRuntimeTitle"}}</h3>
             <div class="muted small">{{.T "system.rewriteRuntimeHint"}}</div>
           </div>
+          <div class="btn-row">
+            <a class="btn" href="/_hazuki/system/rewrite-trace?download=1">{{.T "system.rewriteRuntime.exportTrace"}}</a>
+          </div>
           <div class="segmented" data-hz-rewrite-tabs>
             <button class="seg active" type="button" data-hz-rewrite-tab="gitHTML">{{.T "system.rewriteRuntime.tab.gitHTML"}}</button>
             <button class="seg" type="button" data-hz-rewrite-tab="torcherinoHTML">{{.T "system.rewriteRuntime.tab.torcherinoHTML"}}</button>
@@ -102,6 +105,62 @@
           <div class="hz-metric">
             <div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div>
             <div class="hz-metric-value"><code data-hz-rewrite-field="shared.activeRewrites">{{.RewriteRuntime.Shared.ActiveRewrites}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.inflightWeight"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.activeRewriteWeight">{{.RewriteRuntime.Shared.ActiveRewriteWeight}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.bufferedAdmission"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.bufferedAdmission">{{.RewriteRuntime.Shared.BufferedAdmission}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.bufferedFallbacks"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.bufferedFallbacks">{{.RewriteRuntime.Shared.BufferedFallbacks}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.pressure"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.adaptivePressure">{{.RewriteRuntime.Shared.AdaptivePressure}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.traceSamples"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.adaptiveTraceSamples">{{.RewriteRuntime.Shared.AdaptiveTraceSamples}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.predictedUtilization"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.predictedUtilization">{{.RewriteRuntime.Shared.PredictedUtilization}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.learnedAdmissionShare"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.learnedAdmissionShare">{{.RewriteRuntime.Shared.LearnedAdmissionShare}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.gcTarget"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.adaptiveGC">{{.RewriteRuntime.Shared.AdaptiveGC}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.gcMode"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.adaptiveMode">{{.RewriteRuntime.Shared.AdaptiveMode}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.autoTuneStatus"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.autoTuneStatus">{{.RewriteRuntime.Shared.AutoTuneStatus}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.autoTuneWindow"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.autoTuneWindow">{{.RewriteRuntime.Shared.AutoTuneWindow}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.autoTuneGain"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.autoTuneGain">{{.RewriteRuntime.Shared.AutoTuneGain}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.activeAdmissionModel"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.activeAdmissionModel">{{.RewriteRuntime.Shared.ActiveAdmissionModel}}</code></div>
+          </div>
+          <div class="hz-metric">
+            <div class="hz-metric-label">{{.T "system.rewriteRuntime.autoTuneLast"}}</div>
+            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.autoTuneLast">{{.RewriteRuntime.Shared.AutoTuneLast}}</code></div>
           </div>
         </div>
 

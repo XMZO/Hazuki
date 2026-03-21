@@ -66,6 +66,7 @@ func NewHandler(opts Options) (http.Handler, error) {
 	mux.HandleFunc("/_hazuki/stats", s.wrapRequireAuth(s.stats))
 	mux.HandleFunc("/_hazuki/system/git-rewrite", s.wrapRequireAuth(s.systemGitRewriteStatus))
 	mux.HandleFunc("/_hazuki/system/rewrite-runtime", s.wrapRequireAuth(s.systemRewriteRuntimeStatus))
+	mux.HandleFunc("/_hazuki/system/rewrite-trace", s.wrapRequireAuth(s.systemRewriteTrace))
 	mux.HandleFunc("/setup", s.wrap(s.setup))
 	mux.HandleFunc("/login", s.wrap(s.login))
 	mux.HandleFunc("/lang", s.wrap(s.setLang))

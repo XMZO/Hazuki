@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"hazuki-go/internal/metrics"
+	"hazuki-go/internal/proxy/rewritebudget"
 	"hazuki-go/internal/storage"
 )
 
@@ -21,6 +22,9 @@ func Run(ctx context.Context) error {
 	if _, err := os.Stat("go.mod"); err == nil {
 		_ = godotenv.Load(".env")
 	}
+	rewritebudget.ApplyRuntimeEnv()
+	rewritebudget.StartAdaptiveGCController(ctx)
+	startRewriteAutoTune(ctx)
 
 	dbPath := strings.TrimSpace(os.Getenv("HAZUKI_DB_PATH"))
 	if dbPath == "" {

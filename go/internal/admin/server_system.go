@@ -261,6 +261,45 @@ func (s *server) systemRewriteRuntimeStatus(w http.ResponseWriter, r *http.Reque
 	_, _ = w.Write(b)
 }
 
+func (s *server) systemRewriteTrace(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		// continue
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cfg, err := s.config.GetDecryptedConfig()
+	if err != nil {
+		http.Error(w, "Bad gateway", http.StatusBadGateway)
+		return
+	}
+
+	payload := map[string]any{
+		"ok":             true,
+		"time":           time.Now().UTC().Format(time.RFC3339Nano),
+		"rewriteRuntime": s.buildRewriteRuntimeData(r, cfg),
+		"memoryStatus":   rewritebudget.CurrentMemoryStatus(),
+		"governor":       rewritebudget.CurrentGovernorStatus(),
+		"model":          rewritebudget.CurrentRuntimeModelStatus(),
+		"trace":          rewritebudget.ExportRuntimeTrace(),
+	}
+	b, _ := json.MarshalIndent(payload, "", "  ")
+
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	w.Header().Set("cache-control", "no-store")
+	if strings.TrimSpace(r.URL.Query().Get("download")) == "1" {
+		filename := "hazuki-rewrite-trace-" + time.Now().UTC().Format("20060102T150405Z") + ".json"
+		w.Header().Set("content-disposition", "attachment; filename=\""+filename+"\"")
+	}
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write(b)
+}
+
 func (s *server) buildGitHTMLRewriteData(r *http.Request, cfg model.AppConfig) systemGitHTMLRewriteData {
 	status := gitproxy.CurrentHTMLRewriteStatus()
 	unknownLength := "-"
@@ -293,19 +332,35 @@ func (s *server) buildGitHTMLRewriteData(r *http.Request, cfg model.AppConfig) s
 
 func (s *server) buildRewriteRuntimeData(r *http.Request, cfg model.AppConfig) systemRewriteRuntimeData {
 	shared := rewritebudget.CurrentMemoryStatus()
+	governor := rewritebudget.CurrentGovernorStatus()
+	model := rewritebudget.CurrentRuntimeModelStatus()
 	sharedActiveRewrites := rewritebudget.CurrentActiveCount()
 	gitStatus := gitproxy.CurrentHTMLRewriteStatus()
 	torcherinoStatus := torcherinoproxy.CurrentRewriteStatus()
 
 	return systemRewriteRuntimeData{
 		Shared: systemRewriteRuntimeSharedData{
-			BudgetSource:   localizeRewriteBudgetSource(s, r, shared.BudgetSource),
-			MemoryBudget:   formatOptionalBytes(shared.MemoryBudgetBytes),
-			GoUsed:         formatOptionalBytes(shared.GoMemoryUsedBytes),
-			EffectiveUsed:  formatOptionalBytes(shared.EffectiveUsedBytes),
-			CgroupCurrent:  formatOptionalBytes(shared.CgroupCurrentBytes),
-			CgroupEvents:   formatCgroupEvents(shared.CgroupHighEvents, shared.CgroupMaxEvents, shared.CgroupOOMEvents, shared.CgroupOOMKillEvents),
-			ActiveRewrites: formatOptionalCount(sharedActiveRewrites),
+			BudgetSource:          localizeRewriteBudgetSource(s, r, shared.BudgetSource),
+			MemoryBudget:          formatOptionalBytes(shared.MemoryBudgetBytes),
+			GoUsed:                formatOptionalBytes(shared.GoMemoryUsedBytes),
+			EffectiveUsed:         formatOptionalBytes(shared.EffectiveUsedBytes),
+			CgroupCurrent:         formatOptionalBytes(shared.CgroupCurrentBytes),
+			CgroupEvents:          formatCgroupEvents(shared.CgroupHighEvents, shared.CgroupMaxEvents, shared.CgroupOOMEvents, shared.CgroupOOMKillEvents),
+			ActiveRewrites:        formatOptionalCount(sharedActiveRewrites),
+			ActiveRewriteWeight:   formatBytesOrZero(shared.ActiveRewriteWeightBytes),
+			BufferedAdmission:     formatBufferedAdmission(shared.BufferedAdmissionInUseBytes, shared.BufferedAdmissionLimitBytes),
+			BufferedFallbacks:     formatOptionalCount(shared.BufferedAdmissionFallbacks),
+			AdaptivePressure:      formatMilliPercentZeroAllowed(governor.PressureMilli),
+			AdaptiveTraceSamples:  formatOptionalCount(shared.AdaptiveTraceSamples),
+			PredictedUtilization:  formatMilliPercentZeroAllowed(shared.PredictedUtilMilli),
+			LearnedAdmissionShare: formatMilliPercentZeroAllowed(shared.LearnedAdmissionShareMilli),
+			AdaptiveGC:            formatGovernorGC(governor),
+			AdaptiveMode:          localizeGovernorMode(s, r, governor.Mode),
+			AutoTuneStatus:        formatAutoTuneStatus(s, r, model),
+			AutoTuneWindow:        formatAutoTuneWindow(model),
+			AutoTuneGain:          formatAutoTuneGain(model),
+			ActiveAdmissionModel:  formatAdmissionModel(model.ActiveAdmissionIntercept, model.ActiveAdmissionSlope),
+			AutoTuneLast:          formatAutoTuneLast(model),
 		},
 		GitHTML:        s.buildRewriteTunerData(r, hasAnyEnabledGitProxy(cfg), gitStatus.ActiveRewrites, gitStatus.RewriteReserveBytes, gitStatus.HeadroomBytes, gitStatus.BufferedLimitBytes, gitStatus.StreamChunkBytes, gitStatus.UnknownLengthStreams, gitStatus.BufferedSamples, gitStatus.StreamingSamples, gitStatus.RecentHTMLP90Bytes, gitStatus.BufferedCostMultiplierMilli, gitStatus.UsableShareMilli, gitStatus.BufferedThroughputBytesPerSec, gitStatus.StreamingThroughputBytesPerSec),
 		TorcherinoHTML: s.buildRewriteTunerData(r, !cfg.Torcherino.Disabled, torcherinoStatus.HTML.ActiveRewrites, torcherinoStatus.HTML.RewriteReserveBytes, torcherinoStatus.HTML.HeadroomBytes, torcherinoStatus.HTML.BufferedLimitBytes, torcherinoStatus.HTML.StreamChunkBytes, torcherinoStatus.HTML.UnknownLengthStreams, torcherinoStatus.HTML.BufferedSamples, torcherinoStatus.HTML.StreamingSamples, torcherinoStatus.HTML.RecentBodyP90Bytes, torcherinoStatus.HTML.BufferedCostMultiplierMilli, torcherinoStatus.HTML.UsableShareMilli, torcherinoStatus.HTML.BufferedThroughputBytesPerSec, torcherinoStatus.HTML.StreamingThroughputBytesPerSec),
@@ -349,6 +404,51 @@ func localizeRewriteBudgetSource(s *server, r *http.Request, source string) stri
 	}
 }
 
+func localizeGovernorMode(s *server, r *http.Request, mode string) string {
+	switch mode {
+	case "relaxed":
+		return s.t(r, "system.rewriteRuntime.gcMode.relaxed")
+	case "balanced":
+		return s.t(r, "system.rewriteRuntime.gcMode.balanced")
+	case "guarded":
+		return s.t(r, "system.rewriteRuntime.gcMode.guarded")
+	case "emergency":
+		return s.t(r, "system.rewriteRuntime.gcMode.emergency")
+	default:
+		return s.t(r, "system.rewriteRuntime.gcMode.off")
+	}
+}
+
+func localizeAutoTuneReason(s *server, r *http.Request, reason string) string {
+	switch reason {
+	case "disabled":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.disabled")
+	case "warming_up":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.warming")
+	case "promote":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.promote")
+	case "no_material_change":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.steady")
+	case "validation_improvement_too_small":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.waiting")
+	case "validation_risk_regressed":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.risk")
+	case "context_regression_too_large":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.context")
+	case "insufficient_validation_observations":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.notEnoughObs")
+	case "insufficient_validation_contexts":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.notEnoughCtx")
+	case "boot":
+		return s.t(r, "system.rewriteRuntime.autoTune.reason.boot")
+	default:
+		if strings.TrimSpace(reason) == "" {
+			return s.t(r, "system.rewriteRuntime.autoTune.reason.waiting")
+		}
+		return reason
+	}
+}
+
 func formatOptionalBytes(n int64) string {
 	if n <= 0 {
 		return "-"
@@ -361,6 +461,20 @@ func formatOptionalRate(n int64) string {
 		return "-"
 	}
 	return formatBytes(n) + "/s"
+}
+
+func formatBytesOrZero(n int64) string {
+	if n <= 0 {
+		return "0 B"
+	}
+	return formatBytes(n)
+}
+
+func formatBufferedAdmission(inUseBytes, limitBytes int64) string {
+	if limitBytes <= 0 {
+		return "-"
+	}
+	return formatBytesOrZero(inUseBytes) + " / " + formatBytes(limitBytes)
 }
 
 func formatOptionalCount(n int64) string {
@@ -377,11 +491,75 @@ func formatOptionalMilliPercent(milli int) string {
 	return strconv.FormatFloat(float64(milli)/10, 'f', 1, 64) + "%"
 }
 
+func formatMilliPercentZeroAllowed(milli int) string {
+	if milli < 0 {
+		return "-"
+	}
+	return strconv.FormatFloat(float64(milli)/10, 'f', 1, 64) + "%"
+}
+
 func formatOptionalMilliRatio(milli int, suffix string) string {
 	if milli <= 0 {
 		return "-"
 	}
 	return strconv.FormatFloat(float64(milli)/1000, 'f', 3, 64) + suffix
+}
+
+func formatSignedPercent(value float64) string {
+	return strconv.FormatFloat(value, 'f', 1, 64) + "%"
+}
+
+func formatAutoTuneStatus(s *server, r *http.Request, status rewritebudget.RuntimeModelStatus) string {
+	if !status.AutoTuneEnabled {
+		return s.t(r, "system.rewriteRuntime.autoTune.off")
+	}
+	return s.t(r, "system.rewriteRuntime.autoTune.on") + " · " + localizeAutoTuneReason(s, r, status.AutoTuneReason)
+}
+
+func formatAutoTuneWindow(status rewritebudget.RuntimeModelStatus) string {
+	traceSamples := status.AutoTuneTraceSamples
+	if traceSamples < 0 {
+		traceSamples = 0
+	}
+	observationSamples := status.AutoTuneObservationSamples
+	if observationSamples < 0 {
+		observationSamples = 0
+	}
+	window := strconv.Itoa(traceSamples) + " / " + strconv.Itoa(observationSamples)
+	if status.AutoTuneIntervalSeconds > 0 {
+		return window + " / " + (time.Duration(status.AutoTuneIntervalSeconds) * time.Second).String()
+	}
+	return window
+}
+
+func formatAutoTuneGain(status rewritebudget.RuntimeModelStatus) string {
+	if status.AutoTuneObservationSamples <= 0 {
+		return "-"
+	}
+	return formatSignedPercent(status.AutoTuneTrainImprovementPct) + " / " +
+		formatSignedPercent(status.AutoTuneValidationImprovementPct)
+}
+
+func formatAdmissionModel(intercept, slope float64) string {
+	if intercept <= 0 {
+		return "-"
+	}
+	return "i=" + strconv.FormatFloat(intercept, 'f', 3, 64) + " / s=" + strconv.FormatFloat(slope, 'f', 3, 64)
+}
+
+func formatAutoTuneLast(status rewritebudget.RuntimeModelStatus) string {
+	if status.AutoTuneLastRunAt.IsZero() && status.AutoTuneLastPromotedAt.IsZero() {
+		return "-"
+	}
+	runText := "-"
+	if !status.AutoTuneLastRunAt.IsZero() {
+		runText = status.AutoTuneLastRunAt.UTC().Format("15:04:05")
+	}
+	promoteText := "-"
+	if !status.AutoTuneLastPromotedAt.IsZero() {
+		promoteText = status.AutoTuneLastPromotedAt.UTC().Format("15:04:05")
+	}
+	return runText + " / " + promoteText
 }
 
 func formatCgroupEvents(high, maxv, oom, oomKill int64) string {
@@ -392,6 +570,16 @@ func formatCgroupEvents(high, maxv, oom, oomKill int64) string {
 		strconv.FormatInt(maxv, 10) + " / " +
 		strconv.FormatInt(oom, 10) + " / " +
 		strconv.FormatInt(oomKill, 10)
+}
+
+func formatGovernorGC(status rewritebudget.GovernorStatus) string {
+	if !status.Enabled || status.CurrentGCPercent <= 0 {
+		return "-"
+	}
+	if status.MinGCPercent > 0 && status.MaxGCPercent >= status.MinGCPercent {
+		return strconv.Itoa(status.CurrentGCPercent) + " [" + strconv.Itoa(status.MinGCPercent) + "-" + strconv.Itoa(status.MaxGCPercent) + "]"
+	}
+	return strconv.Itoa(status.CurrentGCPercent)
 }
 
 func hasAnyEnabledGitProxy(cfg model.AppConfig) bool {

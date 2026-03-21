@@ -285,10 +285,19 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
 	rewriteKind := detectRewriteKind(contentType)
 	if rewriteKind != rewriteKindNone {
-		finishRewrite := beginRewrite(rewriteKind)
-		defer finishRewrite()
-
 		rewritePlan := torcherinoRewritePlanner(rewriteKind, resp.ContentLength)
+		var releaseBufferedAdmission func()
+		if rewritePlan.Buffered {
+			releaseBufferedAdmission, rewritePlan.Buffered = rewritebudget.AcquireBufferedAdmission(rewritePlan.EstimatedCostBytes)
+			if !rewritePlan.Buffered {
+				rewritePlan.EstimatedCostBytes = estimatedStreamingRewriteCostBytes(currentRewriteTuner(rewriteKind).cfg, rewritePlan.StreamChunkBytes)
+			}
+		}
+		finishRewrite := beginRewrite(rewriteKind, rewritePlan.EstimatedCostBytes)
+		defer finishRewrite()
+		if releaseBufferedAdmission != nil {
+			defer releaseBufferedAdmission()
+		}
 		copyResponseHeaders(w.Header(), resp.Header, false)
 		w.Header().Del("Content-Length")
 		w.Header().Del("Transfer-Encoding")
@@ -735,10 +744,19 @@ func writeCachedResponse(w http.ResponseWriter, r *http.Request, body []byte, me
 	contentType := strings.ToLower(strings.TrimSpace(meta.Type))
 	rewriteKind := detectRewriteKind(contentType)
 	if rewriteKind != rewriteKindNone {
-		finishRewrite := beginRewrite(rewriteKind)
-		defer finishRewrite()
-
 		rewritePlan := torcherinoRewritePlanner(rewriteKind, int64(len(body)))
+		var releaseBufferedAdmission func()
+		if rewritePlan.Buffered {
+			releaseBufferedAdmission, rewritePlan.Buffered = rewritebudget.AcquireBufferedAdmission(rewritePlan.EstimatedCostBytes)
+			if !rewritePlan.Buffered {
+				rewritePlan.EstimatedCostBytes = estimatedStreamingRewriteCostBytes(currentRewriteTuner(rewriteKind).cfg, rewritePlan.StreamChunkBytes)
+			}
+		}
+		finishRewrite := beginRewrite(rewriteKind, rewritePlan.EstimatedCostBytes)
+		defer finishRewrite()
+		if releaseBufferedAdmission != nil {
+			defer releaseBufferedAdmission()
+		}
 		w.Header().Del("Content-Length")
 		w.Header().Del("Transfer-Encoding")
 

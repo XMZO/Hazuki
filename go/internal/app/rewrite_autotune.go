@@ -1,0 +1,167 @@
+package app
+
+import (
+	"context"
+	"os"
+	"strings"
+	"time"
+
+	"hazuki-go/internal/proxy/rewritebudget"
+	"hazuki-go/internal/tools/rewriteopt"
+)
+
+const (
+	defaultRewriteAutoTuneInterval        = 10 * time.Minute
+	defaultRewriteAutoTuneInitialDelay    = 2 * time.Minute
+	defaultRewriteAutoTuneMinTraceSamples = 180
+	defaultRewriteAutoTuneIterations      = 48
+)
+
+func startRewriteAutoTune(ctx context.Context) {
+	enabled := parseBoolDefault(os.Getenv("HAZUKI_REWRITE_AUTOTUNE"), true)
+	interval := parseDurationDefault(os.Getenv("HAZUKI_REWRITE_AUTOTUNE_INTERVAL"), defaultRewriteAutoTuneInterval)
+	minTraceSamples := parsePositiveInt(os.Getenv("HAZUKI_REWRITE_AUTOTUNE_MIN_TRACE_SAMPLES"), defaultRewriteAutoTuneMinTraceSamples)
+	iterations := parsePositiveInt(os.Getenv("HAZUKI_REWRITE_AUTOTUNE_ITERATIONS"), defaultRewriteAutoTuneIterations)
+
+	rewritebudget.ReportAdmissionAutoTune(rewritebudget.AdmissionAutoTuneReport{
+		Enabled:         enabled,
+		Interval:        interval,
+		MinTraceSamples: minTraceSamples,
+		Reason:          "warming_up",
+	})
+	if !enabled {
+		rewritebudget.ReportAdmissionAutoTune(rewritebudget.AdmissionAutoTuneReport{
+			Enabled:         false,
+			Interval:        interval,
+			MinTraceSamples: minTraceSamples,
+			Reason:          "disabled",
+		})
+		return
+	}
+
+	go runRewriteAutoTuneLoop(ctx, interval, minTraceSamples, iterations)
+}
+
+func runRewriteAutoTuneLoop(ctx context.Context, interval time.Duration, minTraceSamples, iterations int) {
+	initialDelay := minDuration(defaultRewriteAutoTuneInitialDelay, interval)
+	if initialDelay <= 0 {
+		initialDelay = time.Minute
+	}
+
+	timer := time.NewTimer(initialDelay)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			runRewriteAutoTune(interval, minTraceSamples, iterations)
+			timer.Reset(interval)
+		}
+	}
+}
+
+func runRewriteAutoTune(interval time.Duration, minTraceSamples, iterations int) {
+	trace := rewritebudget.ExportRuntimeTrace()
+	traceSamples := len(trace)
+	observationSamples := 0
+	if traceSamples > 0 {
+		observationSamples = traceSamples - 1
+	}
+
+	if traceSamples < minTraceSamples {
+		rewritebudget.ReportAdmissionAutoTune(rewritebudget.AdmissionAutoTuneReport{
+			Enabled:            true,
+			Interval:           interval,
+			MinTraceSamples:    minTraceSamples,
+			TraceSamples:       traceSamples,
+			ObservationSamples: observationSamples,
+			Reason:             "warming_up",
+		})
+		return
+	}
+
+	model := rewritebudget.CurrentRuntimeModelStatus()
+	baseline := rewriteopt.DefaultCandidate()
+	if model.ActiveAdmissionIntercept > 0 {
+		baseline.AdmissionIntercept = model.ActiveAdmissionIntercept
+		baseline.AdmissionSlope = model.ActiveAdmissionSlope
+	}
+
+	result := rewriteopt.Optimize(trace, baseline, iterations)
+	report := rewritebudget.AdmissionAutoTuneReport{
+		Enabled:                  true,
+		Interval:                 interval,
+		MinTraceSamples:          minTraceSamples,
+		TraceSamples:             traceSamples,
+		ObservationSamples:       result.Observations,
+		Recommended:              result.Gate.Recommended,
+		Reason:                   result.Gate.Reason,
+		TrainImprovementPct:      result.Gate.TrainImprovementPct,
+		ValidationImprovementPct: result.Gate.ValidationImprovementPct,
+		RiskIncreasePct:          result.Gate.RiskIncreasePct,
+		CandidateIntercept:       result.Best.AdmissionIntercept,
+		CandidateSlope:           result.Best.AdmissionSlope,
+	}
+
+	if result.Gate.Recommended {
+		if hasMaterialCandidateDelta(baseline, result.Best) {
+			report.Promote = true
+		} else {
+			report.Recommended = false
+			report.Reason = "no_material_change"
+		}
+	}
+
+	rewritebudget.ReportAdmissionAutoTune(report)
+}
+
+func hasMaterialCandidateDelta(current, next rewriteopt.Candidate) bool {
+	return absFloat64(current.AdmissionIntercept-next.AdmissionIntercept) >= 0.004 ||
+		absFloat64(current.AdmissionSlope-next.AdmissionSlope) >= 0.008
+}
+
+func parseBoolDefault(value string, fallback bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(value))
+	if raw == "" {
+		return fallback
+	}
+	switch raw {
+	case "1", "true", "yes", "on", "enable", "enabled":
+		return true
+	case "0", "false", "no", "off", "disable", "disabled":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func parseDurationDefault(value string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a <= 0 {
+		return b
+	}
+	if b <= 0 || a < b {
+		return a
+	}
+	return b
+}
+
+func absFloat64(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}

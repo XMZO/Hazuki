@@ -23,18 +23,29 @@ var (
 	detectedStaticMemoryBudgetBytes = sync.OnceValue(detectStaticMemoryBudgetBytes)
 	detectedCgroupEventBase         = sync.OnceValue(readCurrentCgroupEvents)
 	activeRewriteCount              atomic.Int64
+	activeRewriteWeightBytes        atomic.Int64
+	bufferedAdmissionInUseBytes     atomic.Int64
+	bufferedAdmissionFallbacks      atomic.Int64
 )
 
 type MemoryStatus struct {
-	BudgetSource        string
-	MemoryBudgetBytes   int64
-	GoMemoryUsedBytes   int64
-	CgroupCurrentBytes  int64
-	EffectiveUsedBytes  int64
-	CgroupHighEvents    int64
-	CgroupMaxEvents     int64
-	CgroupOOMEvents     int64
-	CgroupOOMKillEvents int64
+	BudgetSource                string
+	MemoryBudgetBytes           int64
+	GoMemoryUsedBytes           int64
+	CgroupCurrentBytes          int64
+	EffectiveUsedBytes          int64
+	CgroupHighEvents            int64
+	CgroupMaxEvents             int64
+	CgroupOOMEvents             int64
+	CgroupOOMKillEvents         int64
+	ActiveRewriteWeightBytes    int64
+	AdaptivePressureMilli       int
+	BufferedAdmissionLimitBytes int64
+	BufferedAdmissionInUseBytes int64
+	BufferedAdmissionFallbacks  int64
+	AdaptiveTraceSamples        int64
+	PredictedUtilMilli          int
+	LearnedAdmissionShareMilli  int
 }
 
 type cgroupMemoryEvents struct {
@@ -45,14 +56,38 @@ type cgroupMemoryEvents struct {
 }
 
 func Begin() func() {
+	return BeginWeighted(0)
+}
+
+func BeginWeighted(weightBytes int64) func() {
+	if weightBytes < 0 {
+		weightBytes = 0
+	}
+	if weightBytes > maxReasonableMemoryBytes {
+		weightBytes = maxReasonableMemoryBytes
+	}
 	activeRewriteCount.Add(1)
+	if weightBytes > 0 {
+		activeRewriteWeightBytes.Add(weightBytes)
+	}
 	return func() {
+		if weightBytes > 0 {
+			activeRewriteWeightBytes.Add(-weightBytes)
+		}
 		activeRewriteCount.Add(-1)
 	}
 }
 
 func CurrentActiveCount() int64 {
 	n := activeRewriteCount.Load()
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+func CurrentActiveWeightBytes() int64 {
+	n := activeRewriteWeightBytes.Load()
 	if n < 0 {
 		return 0
 	}
@@ -70,18 +105,46 @@ func CurrentMemoryStatus() MemoryStatus {
 
 	curEvents := readCurrentCgroupEvents()
 	baseEvents := detectedCgroupEventBase()
+	activeWeight := CurrentActiveWeightBytes()
 
-	return MemoryStatus{
-		BudgetSource:        budgetSource,
-		MemoryBudgetBytes:   memoryBudgetBytes,
-		GoMemoryUsedBytes:   goUsed,
-		CgroupCurrentBytes:  cgroupCurrent,
-		EffectiveUsedBytes:  effectiveUsed,
-		CgroupHighEvents:    positiveDelta(curEvents.High, baseEvents.High),
-		CgroupMaxEvents:     positiveDelta(curEvents.Max, baseEvents.Max),
-		CgroupOOMEvents:     positiveDelta(curEvents.OOM, baseEvents.OOM),
-		CgroupOOMKillEvents: positiveDelta(curEvents.OOMKill, baseEvents.OOMKill),
+	status := MemoryStatus{
+		BudgetSource:                budgetSource,
+		MemoryBudgetBytes:           memoryBudgetBytes,
+		GoMemoryUsedBytes:           goUsed,
+		CgroupCurrentBytes:          cgroupCurrent,
+		EffectiveUsedBytes:          effectiveUsed,
+		CgroupHighEvents:            positiveDelta(curEvents.High, baseEvents.High),
+		CgroupMaxEvents:             positiveDelta(curEvents.Max, baseEvents.Max),
+		CgroupOOMEvents:             positiveDelta(curEvents.OOM, baseEvents.OOM),
+		CgroupOOMKillEvents:         positiveDelta(curEvents.OOMKill, baseEvents.OOMKill),
+		ActiveRewriteWeightBytes:    activeWeight,
+		AdaptivePressureMilli:       currentAdaptivePressureMilli(),
+		BufferedAdmissionInUseBytes: CurrentBufferedAdmissionInUseBytes(),
+		BufferedAdmissionFallbacks:  CurrentBufferedAdmissionFallbacks(),
 	}
+	if limit, enabled := bufferedAdmissionLimitFromStatus(status); enabled {
+		status.BufferedAdmissionLimitBytes = limit
+	}
+	status.AdaptiveTraceSamples = maxInt64Value(adaptiveTraceSamples.Load(), 0)
+	status.PredictedUtilMilli = clampNonNegativeInt64ToInt(adaptivePredictedUtilMilli.Load())
+	status.LearnedAdmissionShareMilli = clampNonNegativeInt64ToInt(adaptiveAdmissionShareMilli.Load())
+	return status
+}
+
+func CurrentBufferedAdmissionInUseBytes() int64 {
+	n := bufferedAdmissionInUseBytes.Load()
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+func CurrentBufferedAdmissionFallbacks() int64 {
+	n := bufferedAdmissionFallbacks.Load()
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 func currentMemoryBudgetStatus() (int64, string) {
@@ -233,4 +296,11 @@ func positiveDelta(cur, base int64) int64 {
 		return 0
 	}
 	return cur - base
+}
+
+func maxInt64Value(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }

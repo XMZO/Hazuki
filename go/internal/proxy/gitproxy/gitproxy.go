@@ -56,9 +56,14 @@ const (
 )
 
 var (
-	htmlRewritePlanner     = chooseHTMLRewritePlan
-	htmlRewriteAutoTuner   = newHTMLRewriteAutoTuner()
-	activeHTMLRewriteCount atomic.Int64
+	htmlRewritePlanner       = chooseHTMLRewritePlan
+	htmlRewriteAutoTuner     = newHTMLRewriteAutoTuner()
+	activeHTMLRewriteCount   atomic.Int64
+	gitStreamChunkBufferPool = sync.Pool{
+		New: func() any {
+			return make([]byte, maxStreamRewriteChunkBytes)
+		},
+	}
 )
 
 type CorsOrigins struct {
@@ -94,9 +99,10 @@ type RuntimeConfig struct {
 }
 
 type htmlRewritePlan struct {
-	Buffered         bool
-	BufferedLimit    int64
-	StreamChunkBytes int
+	Buffered           bool
+	BufferedLimit      int64
+	StreamChunkBytes   int
+	EstimatedCostBytes int64
 }
 
 type HTMLRewriteStatus struct {
@@ -692,10 +698,19 @@ func handleRequest(w http.ResponseWriter, r *http.Request, runtime RuntimeConfig
 	}
 
 	if shouldRewrite {
-		finishRewrite := beginHTMLRewrite()
-		defer finishRewrite()
-
 		rewritePlan := htmlRewritePlanner(resp.ContentLength)
+		var releaseBufferedAdmission func()
+		if rewritePlan.Buffered {
+			releaseBufferedAdmission, rewritePlan.Buffered = rewritebudget.AcquireBufferedAdmission(rewritePlan.EstimatedCostBytes)
+			if !rewritePlan.Buffered {
+				rewritePlan.EstimatedCostBytes = estimatedStreamingRewriteCostBytes(rewritePlan.StreamChunkBytes)
+			}
+		}
+		finishRewrite := beginHTMLRewrite(rewritePlan.EstimatedCostBytes)
+		defer finishRewrite()
+		if releaseBufferedAdmission != nil {
+			defer releaseBufferedAdmission()
+		}
 		if rewritePlan.Buffered {
 			startedAt := time.Now()
 			beforeUsed := rewritebudget.CurrentMemoryStatus().GoMemoryUsedBytes
@@ -1116,6 +1131,7 @@ func deriveHTMLRewritePlanWithSnapshot(memory rewritebudget.MemoryStatus, conten
 			plan.BufferedLimit = 0
 			plan.StreamChunkBytes = minStreamRewriteChunkBytes
 		} else {
+			headroom = reduceHeadroomForInflightWeight(memory, headroom, activeRewrites)
 			usableShare := computeRewriteUsableShare(memory, headroom, activeRewrites, snapshot)
 			usableBudget = computeRewriteUsableBudgetBytes(headroom, activeRewrites, usableShare)
 			plan.BufferedLimit = clampInt64(
@@ -1137,7 +1153,26 @@ func deriveHTMLRewritePlanWithSnapshot(memory rewritebudget.MemoryStatus, conten
 			plan.Buffered = bufferedScore <= streamingScore
 		}
 	}
+	if plan.Buffered {
+		plan.EstimatedCostBytes = estimatedBufferedRewriteCostBytes(contentLength, bufferedCostMultiplier, snapshot)
+	} else {
+		plan.EstimatedCostBytes = estimatedStreamingRewriteCostBytes(plan.StreamChunkBytes)
+	}
 	return plan
+}
+
+func reduceHeadroomForInflightWeight(memory rewritebudget.MemoryStatus, headroomBytes, activeRewrites int64) int64 {
+	if headroomBytes <= 0 {
+		return 0
+	}
+	guardBytes := rewritebudget.PredictiveRewriteGuardBytes(memory, activeRewrites)
+	if guardBytes <= 0 {
+		return headroomBytes
+	}
+	if guardBytes >= headroomBytes {
+		return 0
+	}
+	return headroomBytes - guardBytes
 }
 
 func computeRewriteReserveBytes(memoryBudgetBytes int64, snapshot htmlRewriteTuningSnapshot) int64 {
@@ -1202,6 +1237,15 @@ func computeRewriteUsableShare(memory rewritebudget.MemoryStatus, headroomBytes,
 	}
 	if memory.CgroupOOMEvents > 0 || memory.CgroupOOMKillEvents > 0 {
 		share -= 0.12
+	}
+	if memory.MemoryBudgetBytes > 0 && memory.ActiveRewriteWeightBytes > 0 {
+		weightRatio := float64(memory.ActiveRewriteWeightBytes) / float64(memory.MemoryBudgetBytes)
+		if weightRatio > 0.08 {
+			share -= clampFloat64((weightRatio-0.08)*0.30, 0, 0.07)
+		}
+	}
+	if memory.AdaptivePressureMilli > 0 {
+		share -= clampFloat64(float64(memory.AdaptivePressureMilli)/1000*0.10, 0, 0.10)
 	}
 
 	speedGain := bufferedSpeedGainRatio(snapshot)
@@ -1357,23 +1401,7 @@ func memoryRiskScore(costBytes, usableBudgetBytes int64, pressure float64) float
 }
 
 func rewritePressureIndex(memory rewritebudget.MemoryStatus) float64 {
-	pressure := 0.0
-	if memory.MemoryBudgetBytes > 0 && memory.EffectiveUsedBytes > 0 {
-		utilization := float64(memory.EffectiveUsedBytes) / float64(memory.MemoryBudgetBytes)
-		if utilization > 0.70 {
-			pressure += clampFloat64((utilization-0.70)/0.30, 0, 2.0)
-		}
-	}
-	if memory.CgroupHighEvents > 0 {
-		pressure += clampFloat64(0.05*float64(memory.CgroupHighEvents), 0, 0.4)
-	}
-	if memory.CgroupMaxEvents > 0 {
-		pressure += clampFloat64(0.08*float64(memory.CgroupMaxEvents), 0, 0.5)
-	}
-	if memory.CgroupOOMEvents > 0 || memory.CgroupOOMKillEvents > 0 {
-		pressure += 0.8
-	}
-	return clampFloat64(pressure, 0, 3)
+	return rewritebudget.RuntimePressureIndex(memory)
 }
 
 func referenceRewriteBodyBytes(snapshot htmlRewriteTuningSnapshot) int64 {
@@ -1514,8 +1542,8 @@ func currentHTMLRewriteCount() int64 {
 	return n
 }
 
-func beginHTMLRewrite() func() {
-	finishGlobal := rewritebudget.Begin()
+func beginHTMLRewrite(weightBytes int64) func() {
+	finishGlobal := rewritebudget.BeginWeighted(weightBytes)
 	activeHTMLRewriteCount.Add(1)
 	return func() {
 		activeHTMLRewriteCount.Add(-1)
@@ -1761,9 +1789,11 @@ type replacementPair struct {
 }
 
 type streamReplacement struct {
-	old  []byte
-	new  []byte
-	tail []byte
+	old     []byte
+	new     []byte
+	tail    []byte
+	scratch []byte
+	output  []byte
 }
 
 type countingReader struct {
@@ -1865,9 +1895,9 @@ func (sr *streamReplacement) transform(chunk []byte, final bool) []byte {
 		return append([]byte(nil), chunk...)
 	}
 
-	data := make([]byte, 0, len(sr.tail)+len(chunk))
-	data = append(data, sr.tail...)
-	data = append(data, chunk...)
+	sr.scratch = append(sr.scratch[:0], sr.tail...)
+	sr.scratch = append(sr.scratch, chunk...)
+	data := sr.scratch
 
 	flushLen := len(data)
 	if !final {
@@ -1891,7 +1921,8 @@ func (sr *streamReplacement) transform(chunk []byte, final bool) []byte {
 	if !bytes.Contains(toProcess, sr.old) {
 		return toProcess
 	}
-	return bytes.ReplaceAll(toProcess, sr.old, sr.new)
+	sr.output = appendReplacedBytes(sr.output[:0], toProcess, sr.old, sr.new)
+	return sr.output
 }
 
 func (sr *streamReplacement) pendingPrefixLen(data []byte) int {
@@ -1908,6 +1939,23 @@ func (sr *streamReplacement) pendingPrefixLen(data []byte) int {
 		}
 	}
 	return 0
+}
+
+func appendReplacedBytes(dst, src, oldValue, newValue []byte) []byte {
+	if len(oldValue) == 0 {
+		return append(dst, src...)
+	}
+	start := 0
+	for {
+		idx := bytes.Index(src[start:], oldValue)
+		if idx < 0 {
+			return append(dst, src[start:]...)
+		}
+		idx += start
+		dst = append(dst, src[start:idx]...)
+		dst = append(dst, newValue...)
+		start = idx + len(oldValue)
+	}
 }
 
 func streamApplyReplacements(dst io.Writer, src io.Reader, upstreamDomain, hostName string, replaceDict map[string]string) error {
@@ -1937,11 +1985,13 @@ func streamApplyReplacementsWithChunkSize(dst io.Writer, src io.Reader, upstream
 		return err
 	}
 
-	buf := make([]byte, clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes))
+	buf := acquireGitStreamChunkBuffer()
+	defer releaseGitStreamChunkBuffer(buf)
+	readBuf := buf[:clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes)]
 	for {
-		n, err := src.Read(buf)
+		n, err := src.Read(readBuf)
 		if n > 0 {
-			out := buf[:n]
+			out := readBuf[:n]
 			for _, streamer := range streamers {
 				out = streamer.transform(out, false)
 			}
@@ -1976,20 +2026,22 @@ func streamApplySingleReplacementWithChunkSize(dst io.Writer, src io.Reader, pai
 		return err
 	}
 	newValue := []byte(pair.New)
-	buf := make([]byte, clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes))
+	buf := acquireGitStreamChunkBuffer()
+	defer releaseGitStreamChunkBuffer(buf)
+	readBuf := buf[:clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes)]
 	tailCap := 0
 	if len(oldValue) > 1 {
 		tailCap = len(oldValue) - 1
 	}
 	tail := make([]byte, 0, tailCap)
+	data := make([]byte, 0, len(readBuf)+tailCap)
 
 	for {
-		n, err := src.Read(buf)
+		n, err := src.Read(readBuf)
 		if n > 0 {
 			final := err == io.EOF
-			data := make([]byte, 0, len(tail)+n)
-			data = append(data, tail...)
-			data = append(data, buf[:n]...)
+			data = append(data[:0], tail...)
+			data = append(data, readBuf[:n]...)
 
 			if final {
 				return writeSingleReplacement(dst, data, oldValue, newValue)
@@ -2017,6 +2069,21 @@ func streamApplySingleReplacementWithChunkSize(dst io.Writer, src io.Reader, pai
 			return err
 		}
 	}
+}
+
+func acquireGitStreamChunkBuffer() []byte {
+	buf, _ := gitStreamChunkBufferPool.Get().([]byte)
+	if cap(buf) < maxStreamRewriteChunkBytes {
+		return make([]byte, maxStreamRewriteChunkBytes)
+	}
+	return buf[:maxStreamRewriteChunkBytes]
+}
+
+func releaseGitStreamChunkBuffer(buf []byte) {
+	if cap(buf) < maxStreamRewriteChunkBytes {
+		return
+	}
+	gitStreamChunkBufferPool.Put(buf[:maxStreamRewriteChunkBytes])
 }
 
 func writeSingleReplacementChunk(dst io.Writer, data, oldValue, newValue []byte, flushUpto int) (int, error) {

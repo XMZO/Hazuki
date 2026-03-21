@@ -291,13 +291,27 @@ type systemRewriteRuntimeData struct {
 }
 
 type systemRewriteRuntimeSharedData struct {
-	BudgetSource   string `json:"budgetSource"`
-	MemoryBudget   string `json:"memoryBudget"`
-	GoUsed         string `json:"goUsed"`
-	EffectiveUsed  string `json:"effectiveUsed"`
-	CgroupCurrent  string `json:"cgroupCurrent"`
-	CgroupEvents   string `json:"cgroupEvents"`
-	ActiveRewrites string `json:"activeRewrites"`
+	BudgetSource          string `json:"budgetSource"`
+	MemoryBudget          string `json:"memoryBudget"`
+	GoUsed                string `json:"goUsed"`
+	EffectiveUsed         string `json:"effectiveUsed"`
+	CgroupCurrent         string `json:"cgroupCurrent"`
+	CgroupEvents          string `json:"cgroupEvents"`
+	ActiveRewrites        string `json:"activeRewrites"`
+	ActiveRewriteWeight   string `json:"activeRewriteWeight"`
+	BufferedAdmission     string `json:"bufferedAdmission"`
+	BufferedFallbacks     string `json:"bufferedFallbacks"`
+	AdaptivePressure      string `json:"adaptivePressure"`
+	AdaptiveTraceSamples  string `json:"adaptiveTraceSamples"`
+	PredictedUtilization  string `json:"predictedUtilization"`
+	LearnedAdmissionShare string `json:"learnedAdmissionShare"`
+	AdaptiveGC            string `json:"adaptiveGC"`
+	AdaptiveMode          string `json:"adaptiveMode"`
+	AutoTuneStatus        string `json:"autoTuneStatus"`
+	AutoTuneWindow        string `json:"autoTuneWindow"`
+	AutoTuneGain          string `json:"autoTuneGain"`
+	ActiveAdmissionModel  string `json:"activeAdmissionModel"`
+	AutoTuneLast          string `json:"autoTuneLast"`
 }
 
 type systemRewriteRuntimeTunerData struct {

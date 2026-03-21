@@ -40,9 +40,10 @@ const (
 )
 
 type bodyRewritePlan struct {
-	Buffered         bool
-	BufferedLimit    int64
-	StreamChunkBytes int
+	Buffered           bool
+	BufferedLimit      int64
+	StreamChunkBytes   int
+	EstimatedCostBytes int64
 }
 
 type bodyRewriteConfig struct {
@@ -194,9 +195,24 @@ var (
 		MinUsableShare:           0.58,
 		MaxUsableShare:           0.82,
 	})
-	torcherinoRewritePlanner = chooseTorcherinoRewritePlan
-	activeHTMLRewriteCount   atomic.Int64
-	activeJSONRewriteCount   atomic.Int64
+	torcherinoRewritePlanner        = chooseTorcherinoRewritePlan
+	activeHTMLRewriteCount          atomic.Int64
+	activeJSONRewriteCount          atomic.Int64
+	torcherinoStreamChunkBufferPool = sync.Pool{
+		New: func() any {
+			return make([]byte, maxStreamRewriteChunkBytes)
+		},
+	}
+	torcherinoPendingBufferPool = sync.Pool{
+		New: func() any {
+			return make([]byte, 0, maxStreamRewriteChunkBytes+streamRewriteTailBytes)
+		},
+	}
+	torcherinoRewriteOutBufferPool = sync.Pool{
+		New: func() any {
+			return &bytes.Buffer{}
+		},
+	}
 )
 
 func newBodyRewriteRuntimeTuner(cfg bodyRewriteConfig) *bodyRewriteRuntimeTuner {
@@ -489,6 +505,7 @@ func deriveBodyRewritePlan(cfg bodyRewriteConfig, memory rewritebudget.MemorySta
 			plan.StreamChunkBytes = minStreamRewriteChunkBytes
 			usableBudget = 0
 		} else {
+			headroom = reduceHeadroomForInflightWeight(memory, headroom, activeRewrites)
 			usableShare := computeRewriteUsableShare(cfg, memory, headroom, activeRewrites, snapshot)
 			usableBudget = computeRewriteUsableBudgetBytes(headroom, activeRewrites, usableShare)
 			plan.BufferedLimit = clampInt64(maxBufferedContentLengthForBudget(cfg, usableBudget, bufferedCostMultiplier), minBufferedRewriteBytes, cfg.MaxBufferedBytes)
@@ -506,7 +523,26 @@ func deriveBodyRewritePlan(cfg bodyRewriteConfig, memory rewritebudget.MemorySta
 			plan.Buffered = bufferedScore <= streamingScore
 		}
 	}
+	if plan.Buffered {
+		plan.EstimatedCostBytes = estimatedBufferedRewriteCostBytes(cfg, contentLength, bufferedCostMultiplier, snapshot)
+	} else {
+		plan.EstimatedCostBytes = estimatedStreamingRewriteCostBytes(cfg, plan.StreamChunkBytes)
+	}
 	return plan
+}
+
+func reduceHeadroomForInflightWeight(memory rewritebudget.MemoryStatus, headroomBytes, activeRewrites int64) int64 {
+	if headroomBytes <= 0 {
+		return 0
+	}
+	guardBytes := rewritebudget.PredictiveRewriteGuardBytes(memory, activeRewrites)
+	if guardBytes <= 0 {
+		return headroomBytes
+	}
+	if guardBytes >= headroomBytes {
+		return 0
+	}
+	return headroomBytes - guardBytes
 }
 
 func detectRewriteKind(contentType string) bodyRewriteKind {
@@ -521,8 +557,8 @@ func detectRewriteKind(contentType string) bodyRewriteKind {
 	}
 }
 
-func beginRewrite(kind bodyRewriteKind) func() {
-	finishGlobal := rewritebudget.Begin()
+func beginRewrite(kind bodyRewriteKind, weightBytes int64) func() {
+	finishGlobal := rewritebudget.BeginWeighted(weightBytes)
 	switch kind {
 	case rewriteKindHTML:
 		activeHTMLRewriteCount.Add(1)
@@ -551,12 +587,16 @@ func streamRewriteBodyWithChunkSize(dst io.Writer, src io.Reader, reqOrigin stri
 		return err
 	}
 
-	buf := make([]byte, clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes))
-	pending := make([]byte, 0, len(buf)+streamRewriteTailBytes)
+	buf := acquireTorcherinoStreamChunkBuffer()
+	defer releaseTorcherinoStreamChunkBuffer(buf)
+	readBuf := buf[:clampInt(chunkSize, minStreamRewriteChunkBytes, maxStreamRewriteChunkBytes)]
+	pending := acquireTorcherinoPendingBuffer()
+	defer releaseTorcherinoPendingBuffer(pending)
+	pending = pending[:0]
 	for {
-		n, err := src.Read(buf)
+		n, err := src.Read(readBuf)
 		if n > 0 {
-			pending = append(pending, buf[:n]...)
+			pending = append(pending, readBuf[:n]...)
 			consumed, writeErr := flushStreamingRewrite(dst, pending, reqOrigin, err == io.EOF)
 			if writeErr != nil {
 				return writeErr
@@ -581,7 +621,8 @@ func flushStreamingRewrite(dst io.Writer, data []byte, reqOrigin string, final b
 		return 0, nil
 	}
 
-	var out bytes.Buffer
+	out := acquireTorcherinoRewriteOutBuffer()
+	defer releaseTorcherinoRewriteOutBuffer(out)
 	i := 0
 	for {
 		idx := findNextRewriteURLStart(data, i)
@@ -589,7 +630,7 @@ func flushStreamingRewrite(dst io.Writer, data []byte, reqOrigin string, final b
 			if final {
 				out.Write(data[i:])
 				if out.Len() > 0 {
-					if _, err := dst.Write(out.Bytes()); err != nil {
+					if _, err := out.WriteTo(dst); err != nil {
 						return 0, err
 					}
 				}
@@ -602,7 +643,7 @@ func flushStreamingRewrite(dst io.Writer, data []byte, reqOrigin string, final b
 			}
 			out.Write(data[i:keepFrom])
 			if out.Len() > 0 {
-				if _, err := dst.Write(out.Bytes()); err != nil {
+				if _, err := out.WriteTo(dst); err != nil {
 					return 0, err
 				}
 			}
@@ -615,7 +656,7 @@ func flushStreamingRewrite(dst io.Writer, data []byte, reqOrigin string, final b
 				out.Write(data[i:idx])
 				out.WriteString(rewriteURLToken(data[idx:], reqOrigin))
 				if out.Len() > 0 {
-					if _, err := dst.Write(out.Bytes()); err != nil {
+					if _, err := out.WriteTo(dst); err != nil {
 						return 0, err
 					}
 				}
@@ -623,7 +664,7 @@ func flushStreamingRewrite(dst io.Writer, data []byte, reqOrigin string, final b
 			}
 			out.Write(data[i:idx])
 			if out.Len() > 0 {
-				if _, err := dst.Write(out.Bytes()); err != nil {
+				if _, err := out.WriteTo(dst); err != nil {
 					return 0, err
 				}
 			}
@@ -695,6 +736,53 @@ func newLimitedCaptureBuffer(limit int) *limitedCaptureBuffer {
 		limit = 0
 	}
 	return &limitedCaptureBuffer{limit: limit, buf: make([]byte, 0, limit)}
+}
+
+func acquireTorcherinoStreamChunkBuffer() []byte {
+	buf, _ := torcherinoStreamChunkBufferPool.Get().([]byte)
+	if cap(buf) < maxStreamRewriteChunkBytes {
+		return make([]byte, maxStreamRewriteChunkBytes)
+	}
+	return buf[:maxStreamRewriteChunkBytes]
+}
+
+func releaseTorcherinoStreamChunkBuffer(buf []byte) {
+	if cap(buf) < maxStreamRewriteChunkBytes {
+		return
+	}
+	torcherinoStreamChunkBufferPool.Put(buf[:maxStreamRewriteChunkBytes])
+}
+
+func acquireTorcherinoPendingBuffer() []byte {
+	buf, _ := torcherinoPendingBufferPool.Get().([]byte)
+	if cap(buf) < maxStreamRewriteChunkBytes+streamRewriteTailBytes {
+		return make([]byte, 0, maxStreamRewriteChunkBytes+streamRewriteTailBytes)
+	}
+	return buf[:0]
+}
+
+func releaseTorcherinoPendingBuffer(buf []byte) {
+	if cap(buf) < maxStreamRewriteChunkBytes+streamRewriteTailBytes {
+		return
+	}
+	torcherinoPendingBufferPool.Put(buf[:0])
+}
+
+func acquireTorcherinoRewriteOutBuffer() *bytes.Buffer {
+	buf, _ := torcherinoRewriteOutBufferPool.Get().(*bytes.Buffer)
+	if buf == nil {
+		return &bytes.Buffer{}
+	}
+	buf.Reset()
+	return buf
+}
+
+func releaseTorcherinoRewriteOutBuffer(buf *bytes.Buffer) {
+	if buf == nil {
+		return
+	}
+	buf.Reset()
+	torcherinoRewriteOutBufferPool.Put(buf)
 }
 
 func (b *limitedCaptureBuffer) Write(p []byte) (int, error) {
@@ -798,6 +886,15 @@ func computeRewriteUsableShare(cfg bodyRewriteConfig, memory rewritebudget.Memor
 	}
 	if memory.CgroupOOMEvents > 0 || memory.CgroupOOMKillEvents > 0 {
 		share -= 0.12
+	}
+	if memory.MemoryBudgetBytes > 0 && memory.ActiveRewriteWeightBytes > 0 {
+		weightRatio := float64(memory.ActiveRewriteWeightBytes) / float64(memory.MemoryBudgetBytes)
+		if weightRatio > 0.08 {
+			share -= clampFloat64((weightRatio-0.08)*0.30, 0, 0.07)
+		}
+	}
+	if memory.AdaptivePressureMilli > 0 {
+		share -= clampFloat64(float64(memory.AdaptivePressureMilli)/1000*0.10, 0, 0.10)
 	}
 
 	speedGain := bufferedSpeedGainRatio(snapshot)
@@ -944,23 +1041,7 @@ func memoryRiskScore(costBytes, usableBudgetBytes int64, pressure float64) float
 }
 
 func rewritePressureIndex(memory rewritebudget.MemoryStatus) float64 {
-	pressure := 0.0
-	if memory.MemoryBudgetBytes > 0 && memory.EffectiveUsedBytes > 0 {
-		utilization := float64(memory.EffectiveUsedBytes) / float64(memory.MemoryBudgetBytes)
-		if utilization > 0.70 {
-			pressure += clampFloat64((utilization-0.70)/0.30, 0, 2.0)
-		}
-	}
-	if memory.CgroupHighEvents > 0 {
-		pressure += clampFloat64(0.05*float64(memory.CgroupHighEvents), 0, 0.4)
-	}
-	if memory.CgroupMaxEvents > 0 {
-		pressure += clampFloat64(0.08*float64(memory.CgroupMaxEvents), 0, 0.5)
-	}
-	if memory.CgroupOOMEvents > 0 || memory.CgroupOOMKillEvents > 0 {
-		pressure += 0.8
-	}
-	return clampFloat64(pressure, 0, 3)
+	return rewritebudget.RuntimePressureIndex(memory)
 }
 
 func referenceRewriteBodyBytes(snapshot bodyRewriteTuningSnapshot, defaultBytes, maxBytes int64) int64 {
