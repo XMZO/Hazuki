@@ -546,11 +546,15 @@ func RuntimePressureIndex(status MemoryStatus) float64 {
 			}
 		}
 	}
+	// Use log1p to attenuate cumulative-since-startup event counters: the
+	// first few events have significant impact, but hundreds of events
+	// (common in long-running memory-limited containers) plateau at the cap
+	// instead of saturating immediately with a linear scale.
 	if status.CgroupHighEvents > 0 {
-		pressure += clampFloat64(0.03*float64(status.CgroupHighEvents), 0, 0.25)
+		pressure += clampFloat64(0.10*math.Log1p(float64(status.CgroupHighEvents)), 0, 0.25)
 	}
 	if status.CgroupMaxEvents > 0 {
-		pressure += clampFloat64(0.05*float64(status.CgroupMaxEvents), 0, 0.35)
+		pressure += clampFloat64(0.12*math.Log1p(float64(status.CgroupMaxEvents)), 0, 0.35)
 	}
 	if status.CgroupOOMEvents > 0 || status.CgroupOOMKillEvents > 0 {
 		pressure += 0.6

@@ -103,6 +103,7 @@ func (s *ConfigStore) RestoreVersion(versionID int64, userID *int64) error {
 		s.mu.Unlock()
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(
 		"UPDATE config_current SET config_json = ?, updated_at = ?, updated_by = ? WHERE id = ?",
@@ -111,7 +112,6 @@ func (s *ConfigStore) RestoreVersion(versionID int64, userID *int64) error {
 		userID,
 		configRowID,
 	); err != nil {
-		_ = tx.Rollback()
 		s.mu.Unlock()
 		return err
 	}
@@ -123,7 +123,6 @@ func (s *ConfigStore) RestoreVersion(versionID int64, userID *int64) error {
 		userID,
 		fmt.Sprintf("restore:%d", versionID),
 	); err != nil {
-		_ = tx.Rollback()
 		s.mu.Unlock()
 		return err
 	}

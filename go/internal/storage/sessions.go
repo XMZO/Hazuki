@@ -75,6 +75,11 @@ WHERE s.token_hash = ?
 	return User{ID: userID, Username: username}, true, nil
 }
 
+func DeleteSessionsByUser(db *sql.DB, userID int64) error {
+	_, err := db.Exec("DELETE FROM sessions WHERE user_id = ?", userID)
+	return err
+}
+
 func CleanupExpiredSessions(db *sql.DB) error {
 	now := nowIso()
 	_, err := db.Exec("DELETE FROM sessions WHERE expires_at <= ?", now)

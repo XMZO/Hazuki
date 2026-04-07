@@ -28,6 +28,7 @@ type server struct {
 	startedAt      time.Time
 	metrics        *metrics.Registry
 	trafficPersist *traffic.Persister
+	limiter        *loginLimiter
 }
 
 func NewHandler(opts Options) (http.Handler, error) {
@@ -44,6 +45,9 @@ func NewHandler(opts Options) (http.Handler, error) {
 		opts.SessionTTL = 86400
 	}
 
+	limiter := newLoginLimiter()
+	go limiter.startCleanup(make(chan struct{})) // lives for the process lifetime
+
 	s := &server{
 		db:             opts.DB,
 		config:         opts.Config,
@@ -52,6 +56,7 @@ func NewHandler(opts Options) (http.Handler, error) {
 		startedAt:      time.Now(),
 		metrics:        opts.Metrics,
 		trafficPersist: opts.Traffic,
+		limiter:        limiter,
 	}
 
 	// Best-effort cleanup.

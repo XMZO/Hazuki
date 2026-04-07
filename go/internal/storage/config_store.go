@@ -95,6 +95,7 @@ func (s *ConfigStore) InitFromEnvironment(getEnv func(string) string, lookupEnv 
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(
 		"INSERT INTO config_current (id, config_json, updated_at, updated_by) VALUES (?, ?, ?, ?)",
@@ -103,7 +104,6 @@ func (s *ConfigStore) InitFromEnvironment(getEnv func(string) string, lookupEnv 
 		now,
 		nil,
 	); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 
@@ -114,7 +114,6 @@ func (s *ConfigStore) InitFromEnvironment(getEnv func(string) string, lookupEnv 
 		nil,
 		"seed",
 	); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 
@@ -405,6 +404,7 @@ func (s *ConfigStore) Update(req UpdateRequest) error {
 		s.mu.Unlock()
 		return err
 	}
+	defer func() { _ = tx.Rollback() }() // no-op after successful Commit
 
 	if _, err := tx.Exec(
 		"UPDATE config_current SET config_json = ?, updated_at = ?, updated_by = ? WHERE id = ?",
@@ -413,7 +413,6 @@ func (s *ConfigStore) Update(req UpdateRequest) error {
 		req.UserID,
 		configRowID,
 	); err != nil {
-		_ = tx.Rollback()
 		s.mu.Unlock()
 		return err
 	}
@@ -425,7 +424,6 @@ func (s *ConfigStore) Update(req UpdateRequest) error {
 		req.UserID,
 		nullIfEmpty(req.Note),
 	); err != nil {
-		_ = tx.Rollback()
 		s.mu.Unlock()
 		return err
 	}
@@ -692,15 +690,14 @@ func (s *ConfigStore) maybeUpgradeConfigEncryption(storedConfigJSON string, decr
 	if err != nil {
 		return model.AppConfig{}, false, err
 	}
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec("UPDATE config_current SET config_json = ? WHERE id = ?", encoded, configRowID); err != nil {
-		_ = tx.Rollback()
 		return model.AppConfig{}, false, err
 	}
 
 	rows, err := tx.Query("SELECT id, config_json FROM config_versions")
 	if err != nil {
-		_ = tx.Rollback()
 		return model.AppConfig{}, false, err
 	}
 
@@ -709,7 +706,6 @@ func (s *ConfigStore) maybeUpgradeConfigEncryption(storedConfigJSON string, decr
 		var cfg string
 		if err := rows.Scan(&id, &cfg); err != nil {
 			_ = rows.Close()
-			_ = tx.Rollback()
 			return model.AppConfig{}, false, err
 		}
 		if strings.HasPrefix(strings.TrimSpace(cfg), encPrefix) {
@@ -740,7 +736,6 @@ func (s *ConfigStore) maybeUpgradeConfigEncryption(storedConfigJSON string, decr
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		_ = tx.Rollback()
 		return model.AppConfig{}, false, err
 	}
 	_ = rows.Close()

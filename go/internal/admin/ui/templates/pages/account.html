@@ -10,6 +10,10 @@
       <div class="muted small">{{.T "account.passwordMinLength"}}</div>
       <form method="post" action="/account/password" class="form" style="margin-top:12px;">
         <div class="field">
+          <label>{{.T "account.currentPassword"}}</label>
+          <input type="password" name="currentPassword" autocomplete="current-password" required />
+        </div>
+        <div class="field">
           <label>{{.T "account.newPassword"}}</label>
           <input type="password" name="newPassword" autocomplete="new-password" required />
         </div>

@@ -204,8 +204,7 @@ func TestRuntimeTraceTunerLearnsAdmissionShareReductionAfterHotOutcome(t *testin
 }
 
 func TestReportAdmissionAutoTunePromotesLiveModel(t *testing.T) {
-	t.Parallel()
-
+	// NOT parallel: mutates package-level adaptiveTraceTunerState and adaptiveAutoTuneSnapshot.
 	adaptiveTraceTunerState = newRuntimeTraceTuner()
 	adaptiveAutoTuneSnapshot.Store(admissionAutoTuneState{
 		Reason:                   "boot",
@@ -247,8 +246,7 @@ func TestReportAdmissionAutoTunePromotesLiveModel(t *testing.T) {
 }
 
 func TestReportAdmissionAutoTuneConfigOnlyDoesNotMarkRun(t *testing.T) {
-	t.Parallel()
-
+	// NOT parallel: mutates package-level adaptiveAutoTuneSnapshot.
 	adaptiveAutoTuneSnapshot.Store(admissionAutoTuneState{
 		Reason:                   "persisted",
 		ActiveAdmissionIntercept: 0.22,

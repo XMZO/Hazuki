@@ -32,6 +32,8 @@ func init() {
 		"error.exportPasswordMismatch":     "两次输入的备份密码不一致",
 		"error.exportMasterKeyMissing":     "未设置 HAZUKI_MASTER_KEY",
 		"error.loginFailed":                "登录失败",
+		"error.currentPasswordWrong":       "当前密码不正确",
+		"error.tooManyAttempts":            "尝试次数过多，请稍后再试",
 		"error.jsonInvalid":                "JSON 格式错误",
 		"error.configInvalid":              "配置不合法",
 		"error.timeZoneInvalid":            "时区格式不正确（示例：auto、UTC、+08:00、-05:30、UTC+8）",
@@ -613,6 +615,7 @@ func init() {
 		"account.currentUserSuffix": "（本地管理员，SQLite）。",
 		"account.changePassword":    "修改密码",
 		"account.passwordMinLength": "密码至少 8 位。",
+		"account.currentPassword":   "当前密码",
 		"account.newPassword":       "新密码",
 
 		"auth.username": "用户名",
@@ -768,6 +771,8 @@ func init() {
 		"error.exportPasswordMismatch":     "Backup password confirmation does not match",
 		"error.exportMasterKeyMissing":     "HAZUKI_MASTER_KEY is not set",
 		"error.loginFailed":                "Sign in failed",
+		"error.currentPasswordWrong":       "Current password is incorrect",
+		"error.tooManyAttempts":            "Too many attempts, please try again later",
 		"error.jsonInvalid":                "Invalid JSON",
 		"error.configInvalid":              "Invalid config",
 		"error.timeZoneInvalid":            "Invalid time zone format (examples: auto, UTC, +08:00, -05:30, UTC+8).",
@@ -1349,6 +1354,7 @@ func init() {
 		"account.currentUserSuffix": " (local admin, SQLite).",
 		"account.changePassword":    "Change password",
 		"account.passwordMinLength": "Password must be at least 8 characters.",
+		"account.currentPassword":   "Current password",
 		"account.newPassword":       "New password",
 
 		"auth.username": "Username",

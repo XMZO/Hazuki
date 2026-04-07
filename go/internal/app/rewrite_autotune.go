@@ -22,7 +22,7 @@ const (
 	smallRewriteAutoTuneMemoryBudgetBytes = 768 << 20
 	smallRewriteAutoTuneMaxTraceSamples   = 192
 	smallRewriteAutoTuneIterations        = 16
-	rewriteAutoTuneSkipPressureMilli      = 550
+	rewriteAutoTuneSkipPressureEmergency  = 820
 )
 
 func restoreRewriteAutoTuneModel(ctx context.Context, db *sql.DB) {
@@ -77,6 +77,12 @@ func startRewriteAutoTune(ctx context.Context, db *sql.DB) {
 }
 
 func runRewriteAutoTuneLoop(ctx context.Context, db *sql.DB, interval time.Duration, minTraceSamples, maxTraceSamples, iterations int) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("rewrite_autotune: loop panic: %v", r)
+		}
+	}()
+
 	initialDelay := minDuration(defaultRewriteAutoTuneInitialDelay, interval)
 	if initialDelay <= 0 {
 		initialDelay = time.Minute
@@ -184,15 +190,33 @@ func shouldSkipRewriteAutoTune() (string, bool) {
 	status := rewritebudget.CurrentMemoryStatus()
 	governor := rewritebudget.CurrentGovernorStatus()
 
-	if governor.Mode == "guarded" || governor.Mode == "emergency" {
+	// Only skip in emergency mode.  The previous check also skipped in
+	// "guarded" mode, but with a tight GOMEMLIMIT (e.g. the 256 MiB
+	// default) the governor spends most of its time in guarded, which
+	// permanently prevented autotune from ever running.  Autotune is
+	// pure computation with no memory allocation; it is safe to run in
+	// guarded mode.
+	if governor.Mode == "emergency" {
 		return "busy", true
 	}
-	if governor.PressureMilli >= rewriteAutoTuneSkipPressureMilli {
+
+	// Use a threshold consistent with emergency mode (pressure >= 0.82).
+	// The old threshold of 550 matched guarded mode, causing the same
+	// permanent-skip problem described above.
+	if governor.PressureMilli >= rewriteAutoTuneSkipPressureEmergency {
 		return "busy", true
 	}
-	if status.CgroupMaxEvents > 0 || status.CgroupOOMEvents > 0 || status.CgroupOOMKillEvents > 0 {
+
+	// Only block on OOM/OOMKill events, which indicate genuinely
+	// dangerous conditions.  CgroupMaxEvents was removed because it is
+	// a cumulative-since-startup counter: in memory-limited containers
+	// the kernel routinely triggers "max" events during normal GC
+	// reclaim, so the counter quickly becomes permanently > 0 and
+	// autotune was locked out forever.
+	if status.CgroupOOMEvents > 0 || status.CgroupOOMKillEvents > 0 {
 		return "busy", true
 	}
+
 	if rewritebudget.RuntimePressureIndex(status) >= 1.15 {
 		return "busy", true
 	}

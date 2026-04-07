@@ -71,6 +71,11 @@ func (p *Persister) Start(ctx context.Context, opts Options) (stop func()) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("traffic: persister goroutine panic: %v", r)
+			}
+		}()
 
 		flushTicker := time.NewTicker(flushEvery)
 		defer flushTicker.Stop()

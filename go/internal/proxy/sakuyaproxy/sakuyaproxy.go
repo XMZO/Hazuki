@@ -818,12 +818,11 @@ func (h *Handler) doHedged(primary *http.Client, secondary *http.Client, req *ht
 			timerCh = nil
 		case res := <-ch:
 			if res.err == nil && res.resp != nil {
-				// Winner: cancel the other request.
-				if res.idx == 1 {
-					cancel2()
-				} else {
-					cancel1()
-				}
+				// Cancel both contexts: the winner's response is already
+				// fully received, so its context is no longer needed; the
+				// loser's context must be cancelled to abort in-flight work.
+				cancel1()
+				cancel2()
 				// Close the loser's response (if it arrives). This keeps connections from leaking.
 				if started2 {
 					go func() {

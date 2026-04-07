@@ -115,6 +115,11 @@ func (dbMaintenanceModule) Start(ctx context.Context, env *runtimeEnv, _ chan<- 
 	doneCh := make(chan struct{})
 	go func() {
 		defer close(doneCh)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("db_maintenance: goroutine panic: %v", r)
+			}
+		}()
 
 		// Stagger the initial prune so it doesn't compete with startup bursts.
 		startupTimer := time.NewTimer(30 * time.Second)
@@ -129,6 +134,9 @@ func (dbMaintenanceModule) Start(ctx context.Context, env *runtimeEnv, _ chan<- 
 		}
 		pruneTicker := time.NewTicker(6 * time.Hour)
 		defer pruneTicker.Stop()
+
+		sessionCleanupTicker := time.NewTicker(1 * time.Hour)
+		defer sessionCleanupTicker.Stop()
 
 		var debounce *time.Timer
 		var debounceC <-chan time.Time
@@ -167,6 +175,10 @@ func (dbMaintenanceModule) Start(ctx context.Context, env *runtimeEnv, _ chan<- 
 				debounce = nil
 				debounceC = nil
 				pruneNow()
+			case <-sessionCleanupTicker.C:
+				if err := storage.CleanupExpiredSessions(env.db); err != nil {
+					log.Printf("db_maintenance: session cleanup failed: %v", err)
+				}
 			case <-vacuumC:
 				// It's OK if VACUUM can't acquire an exclusive lock (busy); we'll try next time.
 				maybeVacuum()

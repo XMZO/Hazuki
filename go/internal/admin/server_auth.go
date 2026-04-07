@@ -52,6 +52,19 @@ func (s *server) setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := extractClientIP(r)
+	if !s.limiter.check(clientIP) {
+		w.Header().Set("Retry-After", "60")
+		s.render(w, r, layoutData{
+			Title:        title,
+			BodyTemplate: "setup",
+			User:         st.User,
+			HasUsers:     st.HasUsers,
+			Error:        s.t(r, "error.tooManyAttempts"),
+		})
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		s.render(w, r, layoutData{
 			Title:        title,
@@ -147,6 +160,19 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := extractClientIP(r)
+	if !s.limiter.check(clientIP) {
+		w.Header().Set("Retry-After", "60")
+		s.render(w, r, layoutData{
+			Title:        title,
+			BodyTemplate: "login",
+			User:         st.User,
+			HasUsers:     st.HasUsers,
+			Error:        s.t(r, "error.tooManyAttempts"),
+		})
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		s.render(w, r, layoutData{
 			Title:        title,
@@ -161,6 +187,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	user, ok, err := storage.VerifyUserPassword(s.db, username, password)
 	if err != nil {
+		s.limiter.recordFailure(clientIP)
 		s.render(w, r, layoutData{
 			Title:        title,
 			BodyTemplate: "login",
@@ -171,6 +198,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
+		s.limiter.recordFailure(clientIP)
 		s.render(w, r, layoutData{
 			Title:        title,
 			BodyTemplate: "login",
@@ -180,6 +208,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	s.limiter.clearIP(clientIP)
 	token, err := storage.CreateSession(s.db, user.ID, s.sessionTTL)
 	if err != nil {
 		s.render(w, r, layoutData{
@@ -287,6 +316,24 @@ func (s *server) accountPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	currentPassword := r.FormValue("currentPassword")
+	if _, ok, err := storage.VerifyUserPassword(s.db, st.User.Username, currentPassword); err != nil || !ok {
+		errMsg := s.t(r, "error.currentPasswordWrong")
+		if err != nil {
+			errMsg = err.Error()
+		}
+		s.render(w, r, accountData{
+			layoutData: layoutData{
+				Title:        title,
+				BodyTemplate: "account",
+				User:         st.User,
+				HasUsers:     st.HasUsers,
+				Error:        errMsg,
+			},
+		})
+		return
+	}
+
 	newPassword := r.FormValue("newPassword")
 	if err := storage.UpdateUserPassword(s.db, st.User.ID, newPassword); err != nil {
 		s.render(w, r, accountData{
@@ -300,5 +347,15 @@ func (s *server) accountPassword(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Invalidate all existing sessions for this user, then issue a fresh
+	// one so the current browser stays logged in.  This ensures that any
+	// stolen session token is revoked on password change.
+	_ = storage.DeleteSessionsByUser(s.db, st.User.ID)
+	token, err := storage.CreateSession(s.db, st.User.ID, s.sessionTTL)
+	if err == nil {
+		setSessionCookie(w, token, s.sessionTTL, isSecureRequest(r))
+	}
+
 	http.Redirect(w, r, "/account?ok=1", http.StatusFound)
 }
