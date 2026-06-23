@@ -40,7 +40,6 @@ func Run(ctx context.Context) error {
 	}
 
 	rewritebudget.ApplyRuntimeEnv()
-	restoreRewriteAutoTuneModel(ctx, db)
 	rewritebudget.StartAdaptiveGCController(ctx)
 
 	cryptoContext, err := storage.NewCryptoContext(db, masterKey)
@@ -68,8 +67,6 @@ func Run(ctx context.Context) error {
 		sessionTTL: sessionTTL,
 		metrics:    metrics.NewRegistry(),
 	}
-	startRewriteAutoTune(ctx, db)
-
 	fatalErrCh := make(chan error, 1)
 	modules := []module{
 		trafficModule{},

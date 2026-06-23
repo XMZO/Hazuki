@@ -282,7 +282,6 @@ func (s *server) systemRewriteTrace(w http.ResponseWriter, r *http.Request) {
 		"rewriteRuntime": s.buildRewriteRuntimeData(r, cfg),
 		"memoryStatus":   rewritebudget.CurrentMemoryStatus(),
 		"governor":       rewritebudget.CurrentGovernorStatus(),
-		"model":          rewritebudget.CurrentRuntimeModelStatus(),
 		"trace":          rewritebudget.ExportRuntimeTrace(),
 	}
 	b, _ := json.MarshalIndent(payload, "", "  ")
@@ -333,7 +332,6 @@ func (s *server) buildGitHTMLRewriteData(r *http.Request, cfg model.AppConfig) s
 func (s *server) buildRewriteRuntimeData(r *http.Request, cfg model.AppConfig) systemRewriteRuntimeData {
 	shared := rewritebudget.CurrentMemoryStatus()
 	governor := rewritebudget.CurrentGovernorStatus()
-	model := rewritebudget.CurrentRuntimeModelStatus()
 	sharedActiveRewrites := rewritebudget.CurrentActiveCount()
 	gitStatus := gitproxy.CurrentHTMLRewriteStatus()
 	torcherinoStatus := torcherinoproxy.CurrentRewriteStatus()
@@ -356,11 +354,6 @@ func (s *server) buildRewriteRuntimeData(r *http.Request, cfg model.AppConfig) s
 			LearnedAdmissionShare: formatMilliPercentZeroAllowed(shared.LearnedAdmissionShareMilli),
 			AdaptiveGC:            formatGovernorGC(governor),
 			AdaptiveMode:          localizeGovernorMode(s, r, governor.Mode),
-			AutoTuneStatus:        formatAutoTuneStatus(s, r, model),
-			AutoTuneWindow:        formatAutoTuneWindow(model),
-			AutoTuneGain:          formatAutoTuneGain(model),
-			ActiveAdmissionModel:  formatAdmissionModel(model.ActiveAdmissionIntercept, model.ActiveAdmissionSlope),
-			AutoTuneLast:          formatAutoTuneLast(model),
 		},
 		GitHTML:        s.buildRewriteTunerData(r, hasAnyEnabledGitProxy(cfg), gitStatus.ActiveRewrites, gitStatus.RewriteReserveBytes, gitStatus.HeadroomBytes, gitStatus.BufferedLimitBytes, gitStatus.StreamChunkBytes, gitStatus.UnknownLengthStreams, gitStatus.BufferedSamples, gitStatus.StreamingSamples, gitStatus.RecentHTMLP90Bytes, gitStatus.BufferedCostMultiplierMilli, gitStatus.UsableShareMilli, gitStatus.BufferedThroughputBytesPerSec, gitStatus.StreamingThroughputBytesPerSec),
 		TorcherinoHTML: s.buildRewriteTunerData(r, !cfg.Torcherino.Disabled, torcherinoStatus.HTML.ActiveRewrites, torcherinoStatus.HTML.RewriteReserveBytes, torcherinoStatus.HTML.HeadroomBytes, torcherinoStatus.HTML.BufferedLimitBytes, torcherinoStatus.HTML.StreamChunkBytes, torcherinoStatus.HTML.UnknownLengthStreams, torcherinoStatus.HTML.BufferedSamples, torcherinoStatus.HTML.StreamingSamples, torcherinoStatus.HTML.RecentBodyP90Bytes, torcherinoStatus.HTML.BufferedCostMultiplierMilli, torcherinoStatus.HTML.UsableShareMilli, torcherinoStatus.HTML.BufferedThroughputBytesPerSec, torcherinoStatus.HTML.StreamingThroughputBytesPerSec),
@@ -419,42 +412,6 @@ func localizeGovernorMode(s *server, r *http.Request, mode string) string {
 	}
 }
 
-func localizeAutoTuneReason(s *server, r *http.Request, reason string) string {
-	switch reason {
-	case "disabled":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.disabled")
-	case "warming_up":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.warming")
-	case "promote":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.promote")
-	case "persisted":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.persisted")
-	case "no_material_change":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.steady")
-	case "busy":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.busy")
-	case "promote_memory_only":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.memoryOnly")
-	case "validation_improvement_too_small":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.waiting")
-	case "validation_risk_regressed":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.risk")
-	case "context_regression_too_large":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.context")
-	case "insufficient_validation_observations":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.notEnoughObs")
-	case "insufficient_validation_contexts":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.notEnoughCtx")
-	case "boot":
-		return s.t(r, "system.rewriteRuntime.autoTune.reason.boot")
-	default:
-		if strings.TrimSpace(reason) == "" {
-			return s.t(r, "system.rewriteRuntime.autoTune.reason.waiting")
-		}
-		return reason
-	}
-}
-
 func formatOptionalBytes(n int64) string {
 	if n <= 0 {
 		return "-"
@@ -509,63 +466,6 @@ func formatOptionalMilliRatio(milli int, suffix string) string {
 		return "-"
 	}
 	return strconv.FormatFloat(float64(milli)/1000, 'f', 3, 64) + suffix
-}
-
-func formatSignedPercent(value float64) string {
-	return strconv.FormatFloat(value, 'f', 1, 64) + "%"
-}
-
-func formatAutoTuneStatus(s *server, r *http.Request, status rewritebudget.RuntimeModelStatus) string {
-	if !status.AutoTuneEnabled {
-		return s.t(r, "system.rewriteRuntime.autoTune.off")
-	}
-	return s.t(r, "system.rewriteRuntime.autoTune.on") + " · " + localizeAutoTuneReason(s, r, status.AutoTuneReason)
-}
-
-func formatAutoTuneWindow(status rewritebudget.RuntimeModelStatus) string {
-	traceSamples := status.AutoTuneTraceSamples
-	if traceSamples < 0 {
-		traceSamples = 0
-	}
-	observationSamples := status.AutoTuneObservationSamples
-	if observationSamples < 0 {
-		observationSamples = 0
-	}
-	window := strconv.Itoa(traceSamples) + " / " + strconv.Itoa(observationSamples)
-	if status.AutoTuneIntervalSeconds > 0 {
-		return window + " / " + (time.Duration(status.AutoTuneIntervalSeconds) * time.Second).String()
-	}
-	return window
-}
-
-func formatAutoTuneGain(status rewritebudget.RuntimeModelStatus) string {
-	if status.AutoTuneObservationSamples <= 0 {
-		return "-"
-	}
-	return formatSignedPercent(status.AutoTuneTrainImprovementPct) + " / " +
-		formatSignedPercent(status.AutoTuneValidationImprovementPct)
-}
-
-func formatAdmissionModel(intercept, slope float64) string {
-	if intercept <= 0 {
-		return "-"
-	}
-	return "i=" + strconv.FormatFloat(intercept, 'f', 3, 64) + " / s=" + strconv.FormatFloat(slope, 'f', 3, 64)
-}
-
-func formatAutoTuneLast(status rewritebudget.RuntimeModelStatus) string {
-	if status.AutoTuneLastRunAt.IsZero() && status.AutoTuneLastPromotedAt.IsZero() {
-		return "-"
-	}
-	runText := "-"
-	if !status.AutoTuneLastRunAt.IsZero() {
-		runText = status.AutoTuneLastRunAt.UTC().Format("15:04:05")
-	}
-	promoteText := "-"
-	if !status.AutoTuneLastPromotedAt.IsZero() {
-		promoteText = status.AutoTuneLastPromotedAt.UTC().Format("15:04:05")
-	}
-	return runText + " / " + promoteText
 }
 
 func formatCgroupEvents(high, maxv, oom, oomKill int64) string {

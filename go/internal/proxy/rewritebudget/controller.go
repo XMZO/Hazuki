@@ -18,8 +18,31 @@ const (
 	defaultAdaptiveGCPercent       = 100
 	adaptiveGCTickInterval         = 2 * time.Second
 	adaptiveGCFreeOSMemoryCooldown = 30 * time.Second
-	defaultAdmissionIntercept      = 0.34
-	defaultAdmissionSlope          = -0.14
+)
+
+// AIMD admission control for buffered rewrite.
+//
+// The share of free headroom we are willing to hand to buffered (in-memory)
+// rewrite is governed by an additive-increase / multiplicative-decrease loop,
+// exactly like TCP congestion control:
+//
+//   - the objective is observable and external: avoid memory pressure
+//     (high utilisation, cgroup high/max/oom events) — NOT "match our own
+//     past usage", so there is no self-referential bootstrap;
+//   - when things are calm we probe upward slowly (additive increase);
+//   - when pressure appears we back off fast (multiplicative decrease).
+//
+// This replaces the previous RLS + Gaussian-process + offline-autotune stack,
+// which optimised a target that was bootstrapped from the controller's own
+// limited history and went idle whenever there was no rewrite traffic.
+const (
+	admissionShareMin     = 0.10
+	admissionShareMax     = 0.34
+	admissionShareInit    = 0.20
+	admissionAdditiveStep = 0.01 // additive increase per calm tick
+	admissionDecreaseHigh = 0.85 // mild back-off
+	admissionDecreaseMax  = 0.70 // strong back-off
+	admissionDecreaseOOM  = 0.50 // emergency back-off
 )
 
 const (
@@ -42,32 +65,6 @@ type GovernorStatus struct {
 	AdmissionShareMilli int
 	Mode                string
 	LastAdjustedAt      time.Time
-}
-
-type RuntimeModelStatus struct {
-	FutureUtilIntercept              float64   `json:"futureUtilIntercept"`
-	FutureUtilSlope                  float64   `json:"futureUtilSlope"`
-	FutureUtilResidualP90            float64   `json:"futureUtilResidualP90"`
-	FutureUtilSamples                int64     `json:"futureUtilSamples"`
-	AdmissionIntercept               float64   `json:"admissionIntercept"`
-	AdmissionSlope                   float64   `json:"admissionSlope"`
-	AdmissionSamples                 int64     `json:"admissionSamples"`
-	PredictedUtilMilli               int       `json:"predictedUtilMilli"`
-	LearnedAdmissionShareMilli       int       `json:"learnedAdmissionShareMilli"`
-	AutoTuneEnabled                  bool      `json:"autoTuneEnabled"`
-	AutoTuneIntervalSeconds          int64     `json:"autoTuneIntervalSeconds"`
-	AutoTuneMinTraceSamples          int       `json:"autoTuneMinTraceSamples"`
-	AutoTuneTraceSamples             int       `json:"autoTuneTraceSamples"`
-	AutoTuneObservationSamples       int       `json:"autoTuneObservationSamples"`
-	AutoTuneTrainImprovementPct      float64   `json:"autoTuneTrainImprovementPct"`
-	AutoTuneValidationImprovementPct float64   `json:"autoTuneValidationImprovementPct"`
-	AutoTuneRiskIncreasePct          float64   `json:"autoTuneRiskIncreasePct"`
-	AutoTuneRecommended              bool      `json:"autoTuneRecommended"`
-	AutoTuneReason                   string    `json:"autoTuneReason"`
-	AutoTuneLastRunAt                time.Time `json:"autoTuneLastRunAt"`
-	AutoTuneLastPromotedAt           time.Time `json:"autoTuneLastPromotedAt"`
-	ActiveAdmissionIntercept         float64   `json:"activeAdmissionIntercept"`
-	ActiveAdmissionSlope             float64   `json:"activeAdmissionSlope"`
 }
 
 type RuntimeTraceRecord struct {
@@ -100,39 +97,10 @@ type adaptiveGCState struct {
 	lastOOMEvents     int64
 	lastOOMKillEvents int64
 	lastFreeOSMemory  time.Time
-}
 
-type runtimeTraceSample struct {
-	utilization         float64
-	baseProjectedUtil   float64
-	pressureNorm        float64
-	headroomBytes       int64
-	bufferedInUseBytes  int64
-	bufferedLimitBytes  int64
-	cgroupHighEvents    int64
-	cgroupMaxEvents     int64
-	cgroupOOMEvents     int64
-	cgroupOOMKillEvents int64
-}
-
-type runtimeTraceSnapshot struct {
-	futureUtilIntercept   float64
-	futureUtilSlope       float64
-	futureUtilResidualP90 float64
-	futureUtilSamples     int64
-	admissionIntercept    float64
-	admissionSlope        float64
-	admissionSamples      int64
-}
-
-type runtimeTraceTuner struct {
-	mu                    sync.Mutex
-	prev                  runtimeTraceSample
-	hasPrev               bool
-	futureUtilModel       adaptmodel.LinearRLS
-	futureUtilResidualP90 adaptmodel.P2Quantile
-	admissionShareModel   adaptmodel.LinearRLS
-	snapshot              atomic.Value
+	admissionShare   float64
+	prevProjected    float64
+	hasPrevProjected bool
 }
 
 type runtimeTraceBuffer struct {
@@ -140,40 +108,6 @@ type runtimeTraceBuffer struct {
 	records []RuntimeTraceRecord
 	next    int
 	full    bool
-}
-
-type AdmissionAutoTuneReport struct {
-	Enabled                  bool
-	Interval                 time.Duration
-	MinTraceSamples          int
-	Run                      bool
-	TraceSamples             int
-	ObservationSamples       int
-	Recommended              bool
-	Reason                   string
-	TrainImprovementPct      float64
-	ValidationImprovementPct float64
-	RiskIncreasePct          float64
-	CandidateIntercept       float64
-	CandidateSlope           float64
-	Promote                  bool
-}
-
-type admissionAutoTuneState struct {
-	Enabled                  bool
-	IntervalSeconds          int64
-	MinTraceSamples          int
-	TraceSamples             int
-	ObservationSamples       int
-	TrainImprovementPct      float64
-	ValidationImprovementPct float64
-	RiskIncreasePct          float64
-	Recommended              bool
-	Reason                   string
-	LastRunAt                time.Time
-	LastPromotedAt           time.Time
-	ActiveAdmissionIntercept float64
-	ActiveAdmissionSlope     float64
 }
 
 var (
@@ -190,35 +124,15 @@ var (
 	adaptiveTraceSamples        atomic.Int64
 	adaptivePredictedUtilMilli  atomic.Int64
 	adaptiveAdmissionShareMilli atomic.Int64
-	adaptiveTraceTunerState     = newRuntimeTraceTuner()
+	adaptiveFutureResidualMilli atomic.Int64
 	adaptiveTraceBuffer         = newRuntimeTraceBuffer(2048)
-	adaptiveAutoTuneMu          sync.Mutex
-	adaptiveAutoTuneSnapshot    atomic.Value
+
+	// futureUtilResidualP90 estimates the P90 of the observed forecast error
+	// (actual utilisation minus projected utilisation) and is used purely as a
+	// safety margin on the predictive utilisation. It is written only by the
+	// single governor goroutine; readers go through adaptiveFutureResidualMilli.
+	futureUtilResidualP90 = adaptmodel.NewP2Quantile(0.90)
 )
-
-func init() {
-	intercept, slope := runtimeAdmissionModelFromEnv()
-	adaptiveAutoTuneSnapshot.Store(admissionAutoTuneState{
-		Reason:                   "boot",
-		ActiveAdmissionIntercept: intercept,
-		ActiveAdmissionSlope:     slope,
-	})
-}
-
-func newRuntimeTraceTuner() *runtimeTraceTuner {
-	admissionIntercept, admissionSlope := runtimeAdmissionModelFromEnv()
-	t := &runtimeTraceTuner{
-		futureUtilModel:       adaptmodel.NewLinearRLS(0, 1, 0.99, 32),
-		futureUtilResidualP90: adaptmodel.NewP2Quantile(0.90),
-		admissionShareModel:   adaptmodel.NewLinearRLS(admissionIntercept, admissionSlope, 0.99, 16),
-	}
-	t.snapshot.Store(runtimeTraceSnapshot{
-		futureUtilSlope:    1,
-		admissionIntercept: admissionIntercept,
-		admissionSlope:     admissionSlope,
-	})
-	return t
-}
 
 func newRuntimeTraceBuffer(size int) *runtimeTraceBuffer {
 	if size <= 0 {
@@ -262,246 +176,6 @@ func (b *runtimeTraceBuffer) Snapshot() []RuntimeTraceRecord {
 
 func ExportRuntimeTrace() []RuntimeTraceRecord {
 	return adaptiveTraceBuffer.Snapshot()
-}
-
-func CurrentRuntimeModelStatus() RuntimeModelStatus {
-	snapshot := adaptiveTraceTunerState.Snapshot()
-	autoTune := currentAdmissionAutoTuneState()
-	return RuntimeModelStatus{
-		FutureUtilIntercept:              snapshot.futureUtilIntercept,
-		FutureUtilSlope:                  snapshot.futureUtilSlope,
-		FutureUtilResidualP90:            snapshot.futureUtilResidualP90,
-		FutureUtilSamples:                snapshot.futureUtilSamples,
-		AdmissionIntercept:               snapshot.admissionIntercept,
-		AdmissionSlope:                   snapshot.admissionSlope,
-		AdmissionSamples:                 snapshot.admissionSamples,
-		PredictedUtilMilli:               clampNonNegativeInt64ToInt(adaptivePredictedUtilMilli.Load()),
-		LearnedAdmissionShareMilli:       clampNonNegativeInt64ToInt(adaptiveAdmissionShareMilli.Load()),
-		AutoTuneEnabled:                  autoTune.Enabled,
-		AutoTuneIntervalSeconds:          autoTune.IntervalSeconds,
-		AutoTuneMinTraceSamples:          autoTune.MinTraceSamples,
-		AutoTuneTraceSamples:             autoTune.TraceSamples,
-		AutoTuneObservationSamples:       autoTune.ObservationSamples,
-		AutoTuneTrainImprovementPct:      autoTune.TrainImprovementPct,
-		AutoTuneValidationImprovementPct: autoTune.ValidationImprovementPct,
-		AutoTuneRiskIncreasePct:          autoTune.RiskIncreasePct,
-		AutoTuneRecommended:              autoTune.Recommended,
-		AutoTuneReason:                   autoTune.Reason,
-		AutoTuneLastRunAt:                autoTune.LastRunAt,
-		AutoTuneLastPromotedAt:           autoTune.LastPromotedAt,
-		ActiveAdmissionIntercept:         autoTune.ActiveAdmissionIntercept,
-		ActiveAdmissionSlope:             autoTune.ActiveAdmissionSlope,
-	}
-}
-
-func (t *runtimeTraceTuner) ResetAdmissionModel(intercept, slope float64) runtimeTraceSnapshot {
-	if t == nil {
-		return runtimeTraceSnapshot{}
-	}
-	intercept = clampFloat64(intercept, 0.16, 0.38)
-	slope = clampFloat64(slope, -0.30, 0.08)
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.admissionShareModel = adaptmodel.NewLinearRLS(intercept, slope, 0.99, 16)
-	future := t.futureUtilModel.Snapshot()
-	snap := runtimeTraceSnapshot{
-		futureUtilIntercept:   future.Intercept,
-		futureUtilSlope:       future.Slope,
-		futureUtilResidualP90: t.futureUtilResidualP90.Estimate(0),
-		futureUtilSamples:     future.Samples,
-		admissionIntercept:    intercept,
-		admissionSlope:        slope,
-		admissionSamples:      0,
-	}
-	t.snapshot.Store(snap)
-	return snap
-}
-
-func RestoreAdmissionAutoTuneActiveModel(intercept, slope float64, promotedAt time.Time) {
-	adaptiveAutoTuneMu.Lock()
-	defer adaptiveAutoTuneMu.Unlock()
-
-	intercept = clampFloat64(intercept, 0.16, 0.38)
-	slope = clampFloat64(slope, -0.30, 0.08)
-	snap := adaptiveTraceTunerState.ResetAdmissionModel(intercept, slope)
-
-	state := currentAdmissionAutoTuneState()
-	state.ActiveAdmissionIntercept = intercept
-	state.ActiveAdmissionSlope = slope
-	if !promotedAt.IsZero() {
-		state.LastPromotedAt = promotedAt.UTC()
-	}
-	state.Reason = "persisted"
-	adaptiveAutoTuneSnapshot.Store(state)
-
-	status := CurrentMemoryStatus()
-	pressure := clampFloat64(RuntimePressureIndex(status)/3, 0, 1)
-	applyAdaptiveTraceStatus(snap, predictiveUtilizationRatio(status), learnedAdmissionShare(status, pressure))
-}
-
-func HasAdmissionModelEnvOverride() bool {
-	_, _, configured := runtimeAdmissionModelFromEnvDetailed()
-	return configured
-}
-
-func ReportAdmissionAutoTune(report AdmissionAutoTuneReport) {
-	adaptiveAutoTuneMu.Lock()
-	defer adaptiveAutoTuneMu.Unlock()
-
-	now := time.Now().UTC()
-	state := currentAdmissionAutoTuneState()
-	state.Enabled = report.Enabled
-	if report.Interval > 0 {
-		state.IntervalSeconds = int64(report.Interval / time.Second)
-	}
-	if report.MinTraceSamples > 0 {
-		state.MinTraceSamples = report.MinTraceSamples
-	}
-	state.TraceSamples = maxInt(report.TraceSamples, 0)
-	state.ObservationSamples = maxInt(report.ObservationSamples, 0)
-	state.TrainImprovementPct = report.TrainImprovementPct
-	state.ValidationImprovementPct = report.ValidationImprovementPct
-	state.RiskIncreasePct = report.RiskIncreasePct
-	state.Recommended = report.Recommended
-	if strings.TrimSpace(report.Reason) != "" {
-		state.Reason = strings.TrimSpace(report.Reason)
-	}
-	if report.Run {
-		state.LastRunAt = now
-	}
-
-	if report.Promote {
-		intercept := clampFloat64(report.CandidateIntercept, 0.16, 0.38)
-		slope := clampFloat64(report.CandidateSlope, -0.30, 0.08)
-		snap := adaptiveTraceTunerState.ResetAdmissionModel(intercept, slope)
-		state.ActiveAdmissionIntercept = intercept
-		state.ActiveAdmissionSlope = slope
-		if state.LastRunAt.IsZero() {
-			state.LastRunAt = now
-		}
-		state.LastPromotedAt = now
-
-		status := CurrentMemoryStatus()
-		pressure := clampFloat64(RuntimePressureIndex(status)/3, 0, 1)
-		applyAdaptiveTraceStatus(snap, predictiveUtilizationRatio(status), learnedAdmissionShare(status, pressure))
-	}
-
-	adaptiveAutoTuneSnapshot.Store(state)
-}
-
-func currentAdmissionAutoTuneState() admissionAutoTuneState {
-	if state, ok := adaptiveAutoTuneSnapshot.Load().(admissionAutoTuneState); ok {
-		return state
-	}
-	intercept, slope := runtimeAdmissionModelFromEnv()
-	return admissionAutoTuneState{
-		Reason:                   "boot",
-		ActiveAdmissionIntercept: intercept,
-		ActiveAdmissionSlope:     slope,
-	}
-}
-
-func (t *runtimeTraceTuner) Observe(status MemoryStatus, pressureNorm float64) runtimeTraceSnapshot {
-	if t == nil {
-		return runtimeTraceSnapshot{}
-	}
-	current := runtimeTraceSample{
-		utilization:         currentUtilizationRatio(status),
-		baseProjectedUtil:   baseProjectedUtilizationRatio(status),
-		pressureNorm:        clampFloat64(pressureNorm, 0, 1),
-		headroomBytes:       maxInt64Value(status.MemoryBudgetBytes-status.EffectiveUsedBytes, 0),
-		bufferedInUseBytes:  status.BufferedAdmissionInUseBytes,
-		bufferedLimitBytes:  status.BufferedAdmissionLimitBytes,
-		cgroupHighEvents:    status.CgroupHighEvents,
-		cgroupMaxEvents:     status.CgroupMaxEvents,
-		cgroupOOMEvents:     status.CgroupOOMEvents,
-		cgroupOOMKillEvents: status.CgroupOOMKillEvents,
-	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.hasPrev {
-		predBefore := t.futureUtilModel.Predict(t.prev.baseProjectedUtil)
-		t.futureUtilModel.Observe(t.prev.baseProjectedUtil, current.utilization)
-		t.futureUtilResidualP90.Observe(maxFloat64(current.utilization-predBefore, 0))
-		if target, ok := deriveObservedAdmissionShareTarget(t.prev, current); ok {
-			t.admissionShareModel.Observe(t.prev.pressureNorm, target)
-		}
-	}
-
-	t.prev = current
-	t.hasPrev = true
-
-	snap := runtimeTraceSnapshot{
-		futureUtilIntercept:   t.futureUtilModel.Snapshot().Intercept,
-		futureUtilSlope:       t.futureUtilModel.Snapshot().Slope,
-		futureUtilResidualP90: t.futureUtilResidualP90.Estimate(0),
-		futureUtilSamples:     t.futureUtilModel.Snapshot().Samples,
-		admissionIntercept:    t.admissionShareModel.Snapshot().Intercept,
-		admissionSlope:        t.admissionShareModel.Snapshot().Slope,
-		admissionSamples:      t.admissionShareModel.Snapshot().Samples,
-	}
-	t.snapshot.Store(snap)
-	return snap
-}
-
-func (t *runtimeTraceTuner) Snapshot() runtimeTraceSnapshot {
-	if t == nil {
-		return runtimeTraceSnapshot{}
-	}
-	if snap, ok := t.snapshot.Load().(runtimeTraceSnapshot); ok {
-		return snap
-	}
-	return runtimeTraceSnapshot{}
-}
-
-func ApplyRuntimeEnv() {
-	runtimeEnvApplyOnce.Do(func() {
-		if limit, ok := runtimeMemoryLimitFromEnv(); ok {
-			debug.SetMemoryLimit(limit)
-		}
-		if gc, ok, disabled := runtimeGCPercentFromEnv(); disabled {
-			adaptiveGCEnabled.Store(false)
-			adaptiveGCMode.Store(governorModeOff)
-		} else if ok {
-			debug.SetGCPercent(gc)
-		}
-	})
-}
-
-func StartAdaptiveGCController(ctx context.Context) {
-	ApplyRuntimeEnv()
-	if !adaptiveGCStarted.CompareAndSwap(false, true) {
-		return
-	}
-
-	baseGC, enabled := detectedAdaptiveBaseGCPercent()
-	if baseGC <= 0 {
-		baseGC = defaultAdaptiveGCPercent
-	}
-	minGC := deriveAdaptiveMinGCPercent(baseGC)
-	maxGC := deriveAdaptiveMaxGCPercent(baseGC)
-
-	adaptiveGCBase.Store(int64(baseGC))
-	adaptiveGCMin.Store(int64(minGC))
-	adaptiveGCMax.Store(int64(maxGC))
-	adaptiveGCCurrent.Store(int64(baseGC))
-	adaptiveGCLastSet.Store(time.Now().Unix())
-
-	if !enabled {
-		adaptiveGCEnabled.Store(false)
-		adaptiveGCMode.Store(governorModeOff)
-		return
-	}
-
-	adaptiveGCEnabled.Store(true)
-	adaptiveGCMode.Store(governorModeBalanced)
-	debug.SetGCPercent(baseGC)
-
-	go runAdaptiveGCController(ctx, adaptiveGCState{currentGCPercent: baseGC})
 }
 
 func CurrentGovernorStatus() GovernorStatus {
@@ -606,6 +280,16 @@ func AcquireBufferedAdmission(weightBytes int64) (func(), bool) {
 	}
 }
 
+// currentAdmissionShare returns the AIMD-controlled share of headroom that may
+// be handed to buffered rewrite.
+func currentAdmissionShare() float64 {
+	v := adaptiveAdmissionShareMilli.Load()
+	if v <= 0 {
+		return admissionShareInit
+	}
+	return clampFloat64(float64(v)/1000, admissionShareMin, admissionShareMax)
+}
+
 func bufferedAdmissionLimitFromStatus(status MemoryStatus) (int64, bool) {
 	if status.MemoryBudgetBytes <= 0 || status.EffectiveUsedBytes < 0 || status.MemoryBudgetBytes <= status.EffectiveUsedBytes {
 		return 0, false
@@ -616,9 +300,8 @@ func bufferedAdmissionLimitFromStatus(status MemoryStatus) (int64, bool) {
 		return 0, true
 	}
 
-	pressure := clampFloat64(RuntimePressureIndex(status)/3, 0, 1)
-	share := learnedAdmissionShare(status, pressure)
-	limitBytes := clampFloat64ToInt64(float64(headroomBytes) * clampFloat64(share, 0.18, 0.34))
+	share := currentAdmissionShare()
+	limitBytes := clampFloat64ToInt64(float64(headroomBytes) * clampFloat64(share, admissionShareMin, admissionShareMax))
 	hardCapBytes := clampInt64(status.MemoryBudgetBytes/5, 8<<20, 64<<20)
 	if limitBytes > hardCapBytes {
 		limitBytes = hardCapBytes
@@ -630,6 +313,58 @@ func bufferedAdmissionLimitFromStatus(status MemoryStatus) (int64, bool) {
 		limitBytes = 2 << 20
 	}
 	return limitBytes, true
+}
+
+func ApplyRuntimeEnv() {
+	runtimeEnvApplyOnce.Do(func() {
+		if limit, ok := runtimeMemoryLimitFromEnv(); ok {
+			debug.SetMemoryLimit(limit)
+		}
+		if gc, ok, disabled := runtimeGCPercentFromEnv(); disabled {
+			adaptiveGCEnabled.Store(false)
+			adaptiveGCMode.Store(governorModeOff)
+		} else if ok {
+			debug.SetGCPercent(gc)
+		}
+	})
+}
+
+func StartAdaptiveGCController(ctx context.Context) {
+	ApplyRuntimeEnv()
+	if !adaptiveGCStarted.CompareAndSwap(false, true) {
+		return
+	}
+
+	baseGC, enabled := detectedAdaptiveBaseGCPercent()
+	if baseGC <= 0 {
+		baseGC = defaultAdaptiveGCPercent
+	}
+	minGC := deriveAdaptiveMinGCPercent(baseGC)
+	// The base GC percent (the user's configured GOGC) is the relaxed ceiling.
+	// Under pressure we only ever tighten toward minGC; we never raise GC above
+	// the configured value, so an idle process honours GOGC instead of being
+	// silently pushed up to 100 (the previous behaviour, which defeated a
+	// low GOGC chosen to save memory).
+	maxGC := baseGC
+
+	adaptiveGCBase.Store(int64(baseGC))
+	adaptiveGCMin.Store(int64(minGC))
+	adaptiveGCMax.Store(int64(maxGC))
+	adaptiveGCCurrent.Store(int64(baseGC))
+	adaptiveGCLastSet.Store(time.Now().Unix())
+	adaptiveAdmissionShareMilli.Store(int64(math.Round(admissionShareInit * 1000)))
+
+	if !enabled {
+		adaptiveGCEnabled.Store(false)
+		adaptiveGCMode.Store(governorModeOff)
+		return
+	}
+
+	adaptiveGCEnabled.Store(true)
+	adaptiveGCMode.Store(governorModeBalanced)
+	debug.SetGCPercent(baseGC)
+
+	go runAdaptiveGCController(ctx, adaptiveGCState{currentGCPercent: baseGC, admissionShare: admissionShareInit})
 }
 
 func runAdaptiveGCController(ctx context.Context, state adaptiveGCState) {
@@ -644,14 +379,44 @@ func runAdaptiveGCController(ctx context.Context, state adaptiveGCState) {
 			return
 		case <-ticker.C:
 			memory := CurrentMemoryStatus()
-			pressure := sampleAdaptiveMemoryPressure(memory, &state)
-			state.pressure = smoothAdaptivePressure(state.pressure, pressure)
-			traceSnapshot := adaptiveTraceTunerState.Observe(memory, state.pressure)
-			predictedUtilization := predictiveUtilizationRatio(memory)
-			admissionShare := learnedAdmissionShare(memory, clampFloat64(RuntimePressureIndex(memory)/3, 0, 1))
-			applyAdaptiveTraceStatus(traceSnapshot, predictedUtilization, admissionShare)
-			targetGC, mode := deriveAdaptiveGCPercent(state.pressure, clampPositiveInt64ToInt(adaptiveGCBase.Load()), clampPositiveInt64ToInt(adaptiveGCMin.Load()), clampPositiveInt64ToInt(adaptiveGCMax.Load()))
 
+			// Per-tick deltas of the cumulative cgroup event counters.
+			highDelta := positiveDelta(memory.CgroupHighEvents, state.lastHighEvents)
+			maxDelta := positiveDelta(memory.CgroupMaxEvents, state.lastMaxEvents)
+			oomDelta := positiveDelta(memory.CgroupOOMEvents, state.lastOOMEvents)
+			oomKillDelta := positiveDelta(memory.CgroupOOMKillEvents, state.lastOOMKillEvents)
+			state.lastHighEvents = memory.CgroupHighEvents
+			state.lastMaxEvents = memory.CgroupMaxEvents
+			state.lastOOMEvents = memory.CgroupOOMEvents
+			state.lastOOMKillEvents = memory.CgroupOOMKillEvents
+
+			// Update the predictive-utilisation safety margin (P90 of the
+			// forecast residual). This observes a real quantity (actual vs
+			// projected utilisation), so it does not bootstrap from policy.
+			util := currentUtilizationRatio(memory)
+			base := baseProjectedUtilizationRatio(memory)
+			if state.hasPrevProjected {
+				futureUtilResidualP90.Observe(maxFloat64(util-state.prevProjected, 0))
+			}
+			state.prevProjected = base
+			state.hasPrevProjected = true
+			residual := futureUtilResidualP90.Estimate(0)
+			adaptiveFutureResidualMilli.Store(int64(clampInt(int(math.Round(residual*1000)), 0, 1500)))
+			predictedUtil := clampFloat64(maxFloat64(base+residual, util), util, 1.5)
+
+			// Pressure index (smoothed) drives the GC governor.
+			pressure := sampleAdaptiveMemoryPressure(memory, highDelta, maxDelta, oomDelta, oomKillDelta)
+			state.pressure = smoothAdaptivePressure(state.pressure, pressure)
+
+			// AIMD admission control.
+			hasInUse := memory.BufferedAdmissionInUseBytes > 0
+			state.admissionShare = nextAdmissionShare(state.admissionShare, util, predictedUtil, hasInUse, highDelta, maxDelta, oomDelta, oomKillDelta)
+			applyAdaptiveTraceStatus(predictedUtil, state.admissionShare, futureUtilResidualP90.Count())
+
+			targetGC, mode := deriveAdaptiveGCPercent(state.pressure,
+				clampPositiveInt64ToInt(adaptiveGCBase.Load()),
+				clampPositiveInt64ToInt(adaptiveGCMin.Load()),
+				clampPositiveInt64ToInt(adaptiveGCMax.Load()))
 			if targetGC <= 0 {
 				targetGC = clampPositiveInt64ToInt(adaptiveGCBase.Load())
 			}
@@ -669,26 +434,34 @@ func runAdaptiveGCController(ctx context.Context, state adaptiveGCState) {
 			}
 			pressureMilli := clampInt(int(math.Round(state.pressure*1000)), 0, 1000)
 			applyAdaptiveGCStatus(targetGC, pressureMilli, mode)
-			appendRuntimeTrace(memory, targetGC, mode, pressureMilli, predictedUtilization, admissionShare)
+			appendRuntimeTrace(memory, targetGC, mode, pressureMilli, predictedUtil, state.admissionShare)
 		}
 	}
 }
 
-func sampleAdaptiveMemoryPressure(memory MemoryStatus, state *adaptiveGCState) float64 {
-	if state == nil {
-		return 0
+// nextAdmissionshare applies one AIMD step. The decrease signals are objective
+// memory-pressure indicators; max/high cgroup events are only trusted when
+// rewrite is actually holding memory, because the kernel routinely raises those
+// during ordinary GC reclaim on a tight memory limit (they would otherwise
+// cause spurious back-off on a completely idle process).
+func nextAdmissionShare(share, util, predictedUtil float64, hasInUse bool, highDelta, maxDelta, oomDelta, oomKillDelta int64) float64 {
+	if share <= 0 {
+		share = admissionShareInit
 	}
+	switch {
+	case oomDelta > 0 || oomKillDelta > 0:
+		share *= admissionDecreaseOOM
+	case util >= 0.92 || (hasInUse && maxDelta > 0):
+		share *= admissionDecreaseMax
+	case util >= 0.85 || predictedUtil >= 0.90 || (hasInUse && highDelta > 0):
+		share *= admissionDecreaseHigh
+	case util <= 0.70 && predictedUtil <= 0.78:
+		share += admissionAdditiveStep
+	}
+	return clampFloat64(share, admissionShareMin, admissionShareMax)
+}
 
-	highDelta := positiveDelta(memory.CgroupHighEvents, state.lastHighEvents)
-	maxDelta := positiveDelta(memory.CgroupMaxEvents, state.lastMaxEvents)
-	oomDelta := positiveDelta(memory.CgroupOOMEvents, state.lastOOMEvents)
-	oomKillDelta := positiveDelta(memory.CgroupOOMKillEvents, state.lastOOMKillEvents)
-
-	state.lastHighEvents = memory.CgroupHighEvents
-	state.lastMaxEvents = memory.CgroupMaxEvents
-	state.lastOOMEvents = memory.CgroupOOMEvents
-	state.lastOOMKillEvents = memory.CgroupOOMKillEvents
-
+func sampleAdaptiveMemoryPressure(memory MemoryStatus, highDelta, maxDelta, oomDelta, oomKillDelta int64) float64 {
 	if memory.MemoryBudgetBytes <= 0 {
 		if oomDelta > 0 || oomKillDelta > 0 {
 			return 1
@@ -749,6 +522,9 @@ func smoothAdaptivePressure(prev, next float64) float64 {
 	return clampFloat64(smoothed, 0, 1)
 }
 
+// deriveAdaptiveGCPercent maps pressure to a GC percent in [minGC, baseGC].
+// At zero pressure the target is baseGC (the user's GOGC); rising pressure
+// tightens monotonically toward minGC. It never exceeds baseGC.
 func deriveAdaptiveGCPercent(pressure float64, baseGC, minGC, maxGC int) (int, int64) {
 	if baseGC <= 0 {
 		baseGC = defaultAdaptiveGCPercent
@@ -757,7 +533,7 @@ func deriveAdaptiveGCPercent(pressure float64, baseGC, minGC, maxGC int) (int, i
 		minGC = deriveAdaptiveMinGCPercent(baseGC)
 	}
 	if maxGC < baseGC {
-		maxGC = deriveAdaptiveMaxGCPercent(baseGC)
+		maxGC = baseGC
 	}
 
 	p := clampFloat64(pressure, 0, 1)
@@ -771,19 +547,8 @@ func deriveAdaptiveGCPercent(pressure float64, baseGC, minGC, maxGC int) (int, i
 		mode = governorModeBalanced
 	}
 
-	target := baseGC
-	switch {
-	case p <= 0.45:
-		factor := 0.0
-		if p > 0 {
-			factor = math.Pow(p/0.45, 1.6)
-		}
-		target = maxGC - int(math.Round(float64(maxGC-baseGC)*factor))
-	default:
-		factor := math.Pow((p-0.45)/0.55, 1.2)
-		target = baseGC - int(math.Round(float64(baseGC-minGC)*factor))
-	}
-	return alignGCPercent(clampInt(target, minGC, maxGC)), int64(mode)
+	target := baseGC - int(math.Round(float64(baseGC-minGC)*math.Pow(p, 1.3)))
+	return alignGCPercent(clampInt(target, minGC, baseGC)), int64(mode)
 }
 
 func shouldForceFreeOSMemory(memory MemoryStatus, state adaptiveGCState, mode int64) bool {
@@ -819,8 +584,8 @@ func applyAdaptiveGCStatus(currentGC, pressureMilli int, mode int64) {
 	adaptiveGCLastSet.Store(time.Now().Unix())
 }
 
-func applyAdaptiveTraceStatus(snapshot runtimeTraceSnapshot, predictedUtilization, admissionShare float64) {
-	adaptiveTraceSamples.Store(maxInt64Value(snapshot.futureUtilSamples, snapshot.admissionSamples))
+func applyAdaptiveTraceStatus(predictedUtilization, admissionShare float64, samples int64) {
+	adaptiveTraceSamples.Store(maxInt64Value(samples, 0))
 	adaptivePredictedUtilMilli.Store(int64(clampInt(int(math.Round(predictedUtilization*1000)), 0, 1500)))
 	adaptiveAdmissionShareMilli.Store(int64(clampInt(int(math.Round(admissionShare*1000)), 0, 1000)))
 }
@@ -875,57 +640,13 @@ func baseProjectedUtilizationRatio(status MemoryStatus) float64 {
 	return clampFloat64(projected, utilization, 1.5)
 }
 
+// predictiveUtilizationRatio is the projected utilisation plus the observed P90
+// forecast residual (published as an atomic by the governor goroutine).
 func predictiveUtilizationRatio(status MemoryStatus) float64 {
 	utilization := currentUtilizationRatio(status)
 	base := baseProjectedUtilizationRatio(status)
-	snapshot := adaptiveTraceTunerState.Snapshot()
-	if snapshot.futureUtilSamples < 8 {
-		return base
-	}
-	predicted := snapshot.futureUtilIntercept + snapshot.futureUtilSlope*base + snapshot.futureUtilResidualP90
-	return clampFloat64(maxFloat64(predicted, utilization), utilization, 1.5)
-}
-
-func learnedAdmissionShare(status MemoryStatus, pressureNorm float64) float64 {
-	pressureNorm = clampFloat64(pressureNorm, 0, 1)
-	defaultShare := clampFloat64(0.34-0.14*pressureNorm, 0.18, 0.34)
-	snapshot := adaptiveTraceTunerState.Snapshot()
-	if snapshot.admissionSamples < 8 {
-		return defaultShare
-	}
-	share := snapshot.admissionIntercept + snapshot.admissionSlope*pressureNorm
-	return clampFloat64(share, 0.16, 0.38)
-}
-
-func deriveObservedAdmissionShareTarget(prev, current runtimeTraceSample) (float64, bool) {
-	if prev.headroomBytes <= 0 {
-		return 0, false
-	}
-	loadShare := 0.0
-	if prev.bufferedInUseBytes > 0 {
-		loadShare = float64(prev.bufferedInUseBytes) / float64(prev.headroomBytes)
-	}
-	if loadShare <= 0 && prev.bufferedLimitBytes <= 0 {
-		return 0, false
-	}
-
-	target := clampFloat64(maxFloat64(loadShare*1.08, 0.18), 0.16, 0.38)
-	highDelta := positiveDelta(current.cgroupHighEvents, prev.cgroupHighEvents)
-	maxDelta := positiveDelta(current.cgroupMaxEvents, prev.cgroupMaxEvents)
-	oomDelta := positiveDelta(current.cgroupOOMEvents, prev.cgroupOOMEvents)
-	oomKillDelta := positiveDelta(current.cgroupOOMKillEvents, prev.cgroupOOMKillEvents)
-
-	switch {
-	case oomDelta > 0 || oomKillDelta > 0 || current.utilization >= 0.94:
-		target *= 0.68
-	case maxDelta > 0 || current.utilization >= 0.90:
-		target *= 0.78
-	case highDelta > 0 || current.utilization >= 0.84:
-		target *= 0.90
-	case loadShare > 0.03 && current.utilization <= 0.75:
-		target *= 1.05
-	}
-	return clampFloat64(target, 0.16, 0.38), true
+	residual := float64(adaptiveFutureResidualMilli.Load()) / 1000
+	return clampFloat64(maxFloat64(base+residual, utilization), utilization, 1.5)
 }
 
 func detectedAdaptiveBaseGCPercent() (int, bool) {
@@ -939,10 +660,6 @@ func detectedAdaptiveBaseGCPercent() (int, bool) {
 
 func deriveAdaptiveMinGCPercent(baseGC int) int {
 	return clampInt(int(math.Round(float64(baseGC)*0.65)), 50, maxInt(baseGC, 80))
-}
-
-func deriveAdaptiveMaxGCPercent(baseGC int) int {
-	return clampInt(maxInt(baseGC+20, 100), maxInt(baseGC, 90), 140)
 }
 
 func alignGCPercent(value int) int {
@@ -992,43 +709,6 @@ func runtimeGCPercentFromEnv() (int, bool, bool) {
 		return n, true, false
 	}
 	return 0, false, false
-}
-
-func runtimeAdmissionModelFromEnv() (float64, float64) {
-	intercept, slope, _ := runtimeAdmissionModelFromEnvDetailed()
-	return intercept, slope
-}
-
-func runtimeAdmissionModelFromEnvDetailed() (float64, float64, bool) {
-	intercept := defaultAdmissionIntercept
-	slope := defaultAdmissionSlope
-	configured := false
-
-	if value, ok := runtimeFloat64FromEnv("HAZUKI_REWRITE_ADMISSION_INTERCEPT"); ok {
-		intercept = clampFloat64(value, 0.16, 0.38)
-		configured = true
-	}
-	if value, ok := runtimeFloat64FromEnv("HAZUKI_REWRITE_ADMISSION_SLOPE"); ok {
-		slope = clampFloat64(value, -0.30, 0.08)
-		configured = true
-	}
-	return intercept, slope, configured
-}
-
-func runtimeFloat64FromEnv(key string) (float64, bool) {
-	raw, ok := os.LookupEnv(key)
-	if !ok {
-		return 0, false
-	}
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return 0, false
-	}
-	n, err := strconv.ParseFloat(value, 64)
-	if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
-		return 0, false
-	}
-	return n, true
 }
 
 func parseByteSize(raw string) (int64, bool) {

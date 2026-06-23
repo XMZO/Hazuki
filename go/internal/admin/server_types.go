@@ -307,11 +307,6 @@ type systemRewriteRuntimeSharedData struct {
 	LearnedAdmissionShare string `json:"learnedAdmissionShare"`
 	AdaptiveGC            string `json:"adaptiveGC"`
 	AdaptiveMode          string `json:"adaptiveMode"`
-	AutoTuneStatus        string `json:"autoTuneStatus"`
-	AutoTuneWindow        string `json:"autoTuneWindow"`
-	AutoTuneGain          string `json:"autoTuneGain"`
-	ActiveAdmissionModel  string `json:"activeAdmissionModel"`
-	AutoTuneLast          string `json:"autoTuneLast"`
 }
 
 type systemRewriteRuntimeTunerData struct {
