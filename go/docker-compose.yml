@@ -4,7 +4,8 @@ services:
     container_name: hazuki-go-redis
     restart: unless-stopped
     volumes:
-      - hazuki-go-redis-data:/data
+      # Bind mount Redis cache data next to SQLite for easier backup/migration.
+      - ./data/redis:/data
     command:
       - redis-server
       - --appendonly
@@ -52,6 +53,3 @@ services:
       - ./data:/data
       # Optional: bind mount .env so Hazuki can update it on master key rotation.
       - ./.env:/app/.env
-
-volumes:
-  hazuki-go-redis-data:
