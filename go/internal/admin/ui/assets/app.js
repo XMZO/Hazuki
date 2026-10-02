@@ -1089,6 +1089,9 @@
     try {
       const v = JSON.parse(raw);
       ta.value = JSON.stringify(v, null, 2);
+      // Formatting is a user action: keep the value and refresh the unsaved state.
+      userTyped.add(ta);
+      if (ta.form && ta.form.hasAttribute("data-hz-dirty")) syncDirty(ta.form);
       if (msgEl) msgEl.textContent = tKey("json.formatted", "Formatted");
     } catch (e) {
       if (msgEl) {
@@ -1125,7 +1128,26 @@
     const input = targetSel ? qs(targetSel) : null;
     if (!(input instanceof HTMLInputElement)) return;
 
+    if (input.classList.contains("secret") && input.type === "text") {
+      input.classList.toggle("is-revealed", el.checked);
+      return;
+    }
     input.type = el.checked ? "text" : "password";
+  };
+
+  // Masked secrets rely on -webkit-text-security; where it's missing, fall back
+  // to a real password field so the value is never shown in clear text.
+  const SECRET_MASK_SUPPORTED = !!(
+    window.CSS &&
+    typeof window.CSS.supports === "function" &&
+    window.CSS.supports("-webkit-text-security", "disc")
+  );
+  const applySecretFallback = () => {
+    if (SECRET_MASK_SUPPORTED) return;
+    for (const input of qsa("input.secret")) {
+      input.type = "password";
+      input.setAttribute("autocomplete", "new-password");
+    }
   };
 
   const extractExt = (requestPath) => {
@@ -1831,14 +1853,66 @@
 
   // ---------------------------------------------------------------------------
   // Unsaved-change tracking for forms marked [data-hz-dirty]
+  //
+  // "Dirty" means a named control differs from its server-rendered value
+  // (defaultValue / defaultChecked / defaultSelected), so undoing an edit clears it.
+  // Password managers and browser autofill write into fields without the user
+  // typing there (e.g. the admin login landing in WORKER_SECRET_KEY); such
+  // writes into never-typed text fields are reverted instead of being saved.
   // ---------------------------------------------------------------------------
+  const TEXTLIKE_TYPES = new Set(["text", "password", "email", "url", "search", "tel", "number"]);
+  const userTyped = new WeakSet();
+
+  const isTextLike = (el) =>
+    el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && TEXTLIKE_TYPES.has(el.type));
+
+  // Only trusted events count: extensions fill via synthetic (untrusted) events,
+  // while a real click/tap or keystroke in the field precedes any user-chosen value.
+  const markUserTyped = (e) => {
+    const t = e.target;
+    if (e.isTrusted && isTextLike(t)) userTyped.add(t);
+  };
+
+  const isTrackedControl = (el) =>
+    (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) &&
+    !!el.name &&
+    !(el instanceof HTMLInputElement && el.type === "hidden") &&
+    !!el.form &&
+    el.form.hasAttribute("data-hz-dirty");
+
+  const controlChanged = (el) => {
+    if (el instanceof HTMLSelectElement) {
+      return Array.from(el.options).some((o, i) => {
+        const dflt = o.defaultSelected || (!el.multiple && i === 0 && !qs("option[selected]", el));
+        return o.selected !== dflt;
+      });
+    }
+    if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+      return el.checked !== el.defaultChecked;
+    }
+    return el.value !== el.defaultValue;
+  };
+
+  // Undo values that appeared in text fields the user never typed into.
+  const revertUntypedText = (form) => {
+    for (const el of Array.from(form.elements)) {
+      if (!isTrackedControl(el) || !isTextLike(el) || userTyped.has(el)) continue;
+      if (el.value !== el.defaultValue) el.value = el.defaultValue;
+    }
+  };
+
+  const syncDirty = (form) => {
+    const dirty = Array.from(form.elements).some((el) => isTrackedControl(el) && controlChanged(el));
+    form.classList.toggle("is-dirty", dirty);
+  };
+
   const onFieldEdited = (e) => {
     const t = e.target;
-    if (!(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement)) return;
-    if (!t.name) return;
-    const form = t.form;
-    if (!form || !form.hasAttribute("data-hz-dirty")) return;
-    form.classList.add("is-dirty");
+    if (!isTrackedControl(t)) return;
+    if (isTextLike(t) && !userTyped.has(t) && t.value !== t.defaultValue) {
+      t.value = t.defaultValue;
+    }
+    syncDirty(t.form);
   };
 
   const hasDirtyForm = () => !!qs("form.is-dirty");
@@ -1894,6 +1968,7 @@
     }
     updateNavActive();
     updateThemeToggle();
+    applySecretFallback();
     liftFlashes();
     applyTimeFormatting();
     initTabs();
@@ -2187,6 +2262,8 @@
     const form = e.target;
     if (!(form instanceof HTMLFormElement)) return;
     if (e.defaultPrevented) return;
+    // Autofill may have filled fields without firing events; never submit those.
+    if (form.hasAttribute("data-hz-dirty")) revertUntypedText(form);
     if (!form.hasAttribute("data-hz-pjax") || !canPjax()) {
       form.classList.remove("is-dirty");
       return;
@@ -2636,6 +2713,9 @@
   document.addEventListener("invalid", onInvalid, true);
   document.addEventListener("input", onPreviewInput);
   document.addEventListener("change", onPreviewInput);
+  for (const type of ["keydown", "paste", "drop", "compositionstart", "pointerdown"]) {
+    document.addEventListener(type, markUserTyped, true);
+  }
   document.addEventListener("input", onFieldEdited);
   document.addEventListener("change", onFieldEdited);
   document.addEventListener("visibilitychange", onVisibilityChange);

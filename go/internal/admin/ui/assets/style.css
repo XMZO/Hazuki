@@ -2906,3 +2906,12 @@ body.hz-modal-open {
     flex: 1 1 0;
   }
 }
+
+/* Service secrets are masked text inputs (see secretInput): password managers only
+   act on type=password, so these are never autofilled or offered for saving. */
+input.secret:not(.is-revealed) {
+  -webkit-text-security: disc;
+}
+input.secret::placeholder {
+  -webkit-text-security: none;
+}

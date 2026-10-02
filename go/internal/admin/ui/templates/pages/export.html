@@ -30,12 +30,12 @@
       <div class="fields form-note">
         <div class="field">
           <label class="label" for="ex-pw">{{.T "export.passwordLabel"}}</label>
-          <input id="ex-pw" type="password" name="password" value="" placeholder="{{.T "export.passwordPlaceholder"}}" autocomplete="new-password" />
+          <input id="ex-pw" type="text" class="secret" name="password" value="" placeholder="{{.T "export.passwordPlaceholder"}}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" />
           <div class="hint">{{.T "export.passwordHint"}}</div>
         </div>
         <div class="field">
           <label class="label" for="ex-pw2">{{.T "export.passwordConfirmLabel"}}</label>
-          <input id="ex-pw2" type="password" name="password2" value="" placeholder="{{.T "export.passwordConfirmPlaceholder"}}" autocomplete="new-password" />
+          <input id="ex-pw2" type="text" class="secret" name="password2" value="" placeholder="{{.T "export.passwordConfirmPlaceholder"}}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" />
         </div>
       </div>
 
