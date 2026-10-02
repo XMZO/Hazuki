@@ -1,212 +1,207 @@
 {{define "sakuya_oplist"}}
-  <div class="grid">
-      <div class="card hz-anchor" id="sakuya-overview">
-      <h2>{{.Title}} <span class="muted small">{{.T "sakuya.oplist.tagline"}}</span></h2>
-      <div class="muted small">{{.T "sakuya.oplist.subtitle"}}</div>
-      <div class="hz-callout err" style="margin-top:12px;">
-        <div class="title">{{.T "common.notice"}}</div>
-        <div style="font-size:13px;">{{.T "sakuya.oplist.warning115Overseas"}}</div>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}} <span class="tag">{{.T "sakuya.oplist.tagline"}}</span></h1>
+        <p class="page-desc">{{.T "sakuya.oplist.subtitle"}}</p>
       </div>
-      <div class="btn-row" style="margin-top:10px;">
-        <span class="pill">{{.T "sakuya.instances.current"}}：<code>{{if .CurrentInstanceID}}{{.CurrentInstanceID}}{{else}}default{{end}}</code>{{if .CurrentInstanceName}} · {{.CurrentInstanceName}}{{end}}</span>
-        <span class="pill">{{.T "common.serviceUrl"}}：<code data-sakuya-base-url>{{.SakuyaBaseURL}}</code></span>
+      <div class="page-actions">
         {{if .SakuyaStatus.Status}}{{template "serviceStatusPill" (statusCtx $ .SakuyaStatus)}}{{end}}
-        <a class="btn" href="{{.SakuyaHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.openHealth"}}</a>
+        <button class="chip" type="button" data-hz-copy="1" data-hz-copy-text="{{.SakuyaBaseURL}}" title="{{.T "common.serviceUrl"}}"><svg class="icon"><use href="#i-link"/></svg><span class="chip-text" data-sakuya-base-url>{{.SakuyaBaseURL}}</span><svg class="icon"><use href="#i-copy"/></svg></button>
+        <a class="btn sm" href="{{.SakuyaHealthURL}}" target="_blank" rel="noreferrer"><svg class="icon"><use href="#i-pulse"/></svg>{{.T "common.health"}}</a>
       </div>
-      <form class="btn-row" method="post" action="/config/sakuya/oplist" style="margin-top:10px;">
-        <input type="hidden" name="action" value="updateGlobal" />
-        <input type="hidden" name="returnInstance" value="{{.CurrentInstanceID}}" />
+    </header>
 
-        <label class="pill" style="font-weight:900;" title="{{.T "sakuya.globalHint"}}">
-          <input type="checkbox" name="sakuyaEnabled" {{if .SakuyaEnabled}}checked{{end}} style="width:14px; height:14px; margin:0;" />
-          <input type="hidden" name="sakuyaEnabled" value="0" />
-          {{.T "sakuya.globalSwitchShort"}}
-        </label>
-
-        <label class="pill" style="font-weight:900; display:flex; gap:6px; align-items:center;" title="{{.T "common.modifiedPortRestart"}}">
-          {{.T "common.port"}}：
-          <input type="text" name="sakuyaPort" value="{{.SakuyaPortValue}}" placeholder="3200" style="width:88px; padding:4px 8px; border-radius:999px;" />
-        </label>
-
-        <button class="btn" type="submit">{{.T "common.save"}}</button>
-      </form>
-      {{if and (eq .SakuyaStatus.Status "error") .SakuyaStatus.Error}}
-        <div class="muted small" style="margin-top:10px;">{{.T "common.healthErrorPrefix"}}：{{.SakuyaStatus.Error}}</div>
-      {{end}}
-      <div class="btn-row hz-page-jump">
-        <a class="btn" href="#sakuya-instances">{{.T "sakuya.instances.title"}}</a>
-        <a class="btn" href="#sakuya-basic">{{.T "common.basicConfig"}}</a>
-        <a class="btn" href="#sakuya-save">{{.T "common.save"}}</a>
-      </div>
+    <div class="callout warn">
+      <svg class="icon"><use href="#i-alert"/></svg>
+      <div class="callout-body"><div class="callout-title">{{.T "common.notice"}}</div><div>{{.T "sakuya.oplist.warning115Overseas"}}</div></div>
     </div>
+    {{if and (eq .SakuyaStatus.Status "error") .SakuyaStatus.Error}}
+      <div class="callout err"><svg class="icon"><use href="#i-alert"/></svg><div class="callout-body">{{.T "common.healthErrorPrefix"}}：{{.SakuyaStatus.Error}}</div></div>
+    {{end}}
 
-    <div class="card hz-anchor" id="sakuya-instances">
-      <h3>{{.T "sakuya.instances.title"}}</h3>
-      <div class="muted small">{{.T "sakuya.instances.hint"}}</div>
-
-      <div class="table-wrap" style="margin-top:12px;">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>{{.T "common.name"}}</th>
-              <th>{{.T "sakuya.instances.prefix"}}</th>
-              <th>{{.T "sakuya.instances.address"}}</th>
-              <th>{{.T "common.status"}}</th>
-              <th>{{.T "common.actions"}}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Instances}}
-              <tr>
-                <td>{{.Name}}</td>
-                <td>{{if .Prefix}}<code>/{{.Prefix}}</code>{{else}}<span class="muted small">{{$.T "common.default"}}</span>{{end}}</td>
-                <td><span class="hz-ellipsis" title="{{.Address}}">{{.Address}}</span></td>
-                <td>{{if .Enabled}}<span class="pill ok">{{$.T "common.enabled"}}</span>{{else}}<span class="pill">{{$.T "common.disabled"}}</span>{{end}}</td>
-                <td>
-                  <div class="btn-row" style="margin-top:0;">
-                    <a class="btn" href="{{if eq .ID "default"}}/config/sakuya/oplist{{else}}/config/sakuya/oplist?instance={{.ID}}{{end}}">{{$.T "common.edit"}}</a>
-                    <a class="btn" href="{{.ServiceURL}}" target="_blank" rel="noreferrer">{{$.T "common.open"}}</a>
-                    <button class="btn" type="button" data-hz-copy="1" data-hz-copy-text="{{.ExampleURL}}">{{$.T "common.copy"}}</button>
-                    {{if ne .ID "default"}}
-                      <form method="post" action="/config/sakuya/oplist" style="margin:0; display:inline;" onsubmit="return confirm({{printf "%q" ($.T "sakuya.instances.confirmDelete" .Prefix)}})">
-                        <input type="hidden" name="action" value="deleteInstance" />
-                        <input type="hidden" name="instanceID" value="{{.ID}}" />
-                        <button class="btn danger" type="submit">{{$.T "common.delete"}}</button>
-                      </form>
-                    {{end}}
-                  </div>
-                </td>
-              </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-
-      <details class="accordion" style="margin-top:12px;">
-        <summary>{{.T "sakuya.instances.addTitle"}}</summary>
-        <div class="body">
-          <form class="form" method="post" action="/config/sakuya/oplist">
-            <input type="hidden" name="action" value="addInstance" />
-            <div class="grid cols-2">
-              <div class="field">
-                <label>{{.T "sakuya.instances.prefixLabel"}}</label>
-                <input type="text" name="newInstancePrefix" value="" placeholder="op1" required />
-                <div class="hint">{{.T "sakuya.instances.prefixHint"}}</div>
-              </div>
-              <div class="field">
-                <label>{{.T "common.name"}} {{.T "common.optionalTag"}}</label>
-                <input type="text" name="newInstanceName" value="" placeholder="{{.T "sakuya.instances.namePlaceholder"}}" />
-              </div>
-            </div>
-            <div class="field">
-              <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                <input type="checkbox" name="ignoreDuplicatePrefix" />
-                {{.T "sakuya.instances.ignoreDup"}}
-              </label>
-              <div class="hint">{{.T "sakuya.instances.ignoreDupHint"}}</div>
-            </div>
-            <div class="btn-row">
-              <button class="btn primary" type="submit">{{.T "common.add"}}</button>
-            </div>
-          </form>
-        </div>
-      </details>
-    </div>
-
-    <form class="form" method="post" action="/config/sakuya/oplist">
-      <input type="hidden" name="instanceID" value="{{.CurrentInstanceID}}" />
-      <div class="card hz-anchor" id="sakuya-basic">
-        <h3>{{.T "common.basicConfig"}}</h3>
-        <div class="grid cols-2">
-          {{if ne .CurrentInstanceID ""}}
-            <div class="field">
-              <label>{{.T "sakuya.instances.prefixLabel"}} <span class="key">sakuya.instances[].prefix</span></label>
-              <input type="text" name="oplistPrefix" value="{{.OplistPrefixValue}}" placeholder="op1" />
-              <div class="hint">{{.T "sakuya.instances.prefixEditHint"}}</div>
-            </div>
-            <div class="field">
-              <label>{{.T "sakuya.oplist.addressLabel"}} <span class="key">sakuya.instances[].address</span></label>
-              <input type="text" name="oplistAddress" value="{{.OplistAddressValue}}" placeholder="https://op.example.com" />
-              <div class="hint">{{.T "sakuya.oplist.addressHint"}}</div>
-            </div>
-          {{else}}
-            <div class="field">
-              <label>{{.T "sakuya.oplist.addressLabel"}} <span class="key">OPLIST_ADDRESS</span></label>
-              <input type="text" name="oplistAddress" value="{{.OplistAddressValue}}" placeholder="https://op.example.com" />
-              <div class="hint">{{.T "sakuya.oplist.addressHint"}}</div>
-            </div>
-            <div class="field">
-              <label>{{.T "sakuya.oplist.publicUrlLabel"}} <span class="key">OPLIST_PUBLIC_URL</span></label>
-              <input type="text" name="oplistPublicUrl" value="{{.OplistPublicURLValue}}" placeholder="https://download.example.com" />
-              <div class="hint hint-line">
-                <span>{{.T "sakuya.oplist.publicUrlHint"}}</span>
-                <span class="spacer"></span>
-                <button class="btn" type="button" data-sakuya-copy-example style="padding:6px 10px; border-radius:999px;">{{.T "sakuya.oplist.copyExample"}}</button>
-              </div>
-              <div class="hint hint-line">
-                <span>{{.T "sakuya.oplist.exampleUrlLabel"}}：</span>
-                <code class="hz-ellipsis" data-sakuya-example-url>-</code>
-              </div>
-            </div>
+    {{if gt (len .Instances) 1}}
+      <div class="toolbar">
+        <span class="muted small">{{.T "sakuya.instances.current"}}</span>
+        <div class="segmented" role="group" aria-label="{{.T "sakuya.instances.current"}}">
+          {{range .Instances}}
+            <a class="seg {{if or (eq .ID $.CurrentInstanceID) (and (eq .ID "default") (eq $.CurrentInstanceID ""))}}active{{end}}" href="{{if eq .ID "default"}}/config/sakuya/oplist{{else}}/config/sakuya/oplist?instance={{.ID}}{{end}}">{{.Name}}{{if .Prefix}} <span class="muted mono small">/{{.Prefix}}</span>{{end}}</a>
           {{end}}
         </div>
+      </div>
+    {{end}}
 
-        {{if ne .CurrentInstanceID ""}}
-          <div class="grid cols-2">
-            <div class="field">
-              <label>{{.T "sakuya.oplist.publicUrlLabel"}} <span class="key">sakuya.instances[].publicUrl</span></label>
-              <input type="text" name="oplistPublicUrl" value="{{.OplistPublicURLValue}}" placeholder="https://download.example.com" />
-              <div class="hint hint-line">
-                <span>{{.T "sakuya.oplist.publicUrlHint"}}</span>
-                <span class="spacer"></span>
-                <button class="btn" type="button" data-sakuya-copy-example style="padding:6px 10px; border-radius:999px;">{{.T "sakuya.oplist.copyExample"}}</button>
+    <nav class="tabs" role="tablist" data-hz-tabs aria-label="{{.Title}}">
+      <button class="tab" type="button" role="tab" data-hz-tab="basic" aria-selected="true"><svg class="icon"><use href="#i-sliders"/></svg>{{.T "common.basicConfig"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="instances" aria-selected="false"><svg class="icon"><use href="#i-layers"/></svg>{{.T "sakuya.instances.title"}} <span class="count">{{len .Instances}}</span></button>
+      <button class="tab" type="button" role="tab" data-hz-tab="global" aria-selected="false"><svg class="icon"><use href="#i-globe"/></svg>{{.T "ui.tab.global"}}</button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
+
+    <form class="tab-form" method="post" action="/config/sakuya/oplist" data-hz-tabform data-hz-dirty data-hz-pjax>
+      <input type="hidden" name="instanceID" value="{{.CurrentInstanceID}}" />
+      <section class="panel" role="tabpanel" data-hz-panel="basic" id="sakuya-basic">
+        <div class="card">
+          <div class="fields">
+            {{if ne .CurrentInstanceID ""}}
+              <div class="field">
+                <label class="label" for="s-prefix">{{.T "sakuya.instances.prefixLabel"}} <span class="key">instances[].prefix</span></label>
+                <input id="s-prefix" type="text" name="oplistPrefix" value="{{.OplistPrefixValue}}" placeholder="op1" />
+                <div class="hint">{{.T "sakuya.instances.prefixEditHint"}}</div>
               </div>
-              <div class="hint hint-line">
-                <span>{{.T "sakuya.oplist.exampleUrlLabel"}}：</span>
-                <code class="hz-ellipsis" data-sakuya-example-url>-</code>
+            {{end}}
+            <div class="field">
+              <label class="label" for="s-addr">{{.T "sakuya.oplist.addressLabel"}} <span class="key">{{if ne .CurrentInstanceID ""}}instances[].address{{else}}OPLIST_ADDRESS{{end}}</span></label>
+              <input id="s-addr" type="text" name="oplistAddress" value="{{.OplistAddressValue}}" placeholder="https://op.example.com" />
+              <div class="hint">{{.T "sakuya.oplist.addressHint"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="s-pub">{{.T "sakuya.oplist.publicUrlLabel"}} <span class="key">{{if ne .CurrentInstanceID ""}}instances[].publicUrl{{else}}OPLIST_PUBLIC_URL{{end}}</span></label>
+              <input id="s-pub" type="text" name="oplistPublicUrl" value="{{.OplistPublicURLValue}}" placeholder="https://download.example.com" />
+              <div class="hint">{{.T "sakuya.oplist.publicUrlHint"}}</div>
+              <div class="hint-row">
+                <span class="hint">{{.T "sakuya.oplist.exampleUrlLabel"}}：<code class="ellipsis" data-sakuya-example-url>-</code></span>
+                <button class="btn sm" type="button" data-sakuya-copy-example><svg class="icon"><use href="#i-copy"/></svg>{{.T "sakuya.oplist.copyExample"}}</button>
               </div>
             </div>
             <div class="field">
-              <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                <input type="checkbox" name="ignoreDuplicatePrefix" {{if .IgnoreDuplicatePrefix}}checked{{end}} />
+              <label class="label" for="oplistTokenInput">{{.T "sakuya.oplist.tokenLabel"}} <span class="key">OPLIST_TOKEN</span></label>
+              {{template "secretInput" (dict "Root" $ "ID" "oplistTokenInput" "Name" "oplistToken" "Placeholder" (or (and .TokenIsSet (.T "secret.placeholderSetKeep")) (.T "secret.placeholderNotSet")))}}
+              <div class="hint-row">
+                <span class="hint">{{.T "sakuya.oplist.tokenHint"}}</span>
+                <label class="check"><input type="checkbox" name="clearOplistToken" />{{.T "common.clear"}}</label>
+              </div>
+            </div>
+          </div>
+          <div class="switches">
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "common.enableService"}} <span class="key">{{if ne .CurrentInstanceID ""}}instances[].disabled{{else}}oplist.disabled{{end}}</span></span>
+                <span class="hint">{{.T "sakuya.serviceToggleHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="serviceEnabled" {{if .ServiceEnabled}}checked{{end}} />
+              <input type="hidden" name="serviceEnabled" value="0" />
+            </label>
+            {{if ne .CurrentInstanceID ""}}
+              <label class="switch-row">
+                <span class="switch-text">
+                  <span class="switch-title">{{.T "sakuya.instances.ignoreDup"}}</span>
+                  <span class="hint">{{.T "sakuya.instances.ignoreDupHint"}}</span>
+                </span>
+                <input class="switch" type="checkbox" name="ignoreDuplicatePrefix" {{if .IgnoreDuplicatePrefix}}checked{{end}} />
                 <input type="hidden" name="ignoreDuplicatePrefix" value="0" />
-                {{.T "sakuya.instances.ignoreDup"}}
               </label>
-              <div class="hint">{{.T "sakuya.instances.ignoreDupHint"}}</div>
-            </div>
-          </div>
-        {{end}}
-
-        <div class="field">
-          <label>{{.T "sakuya.oplist.tokenLabel"}} <span class="key">OPLIST_TOKEN</span></label>
-          <input id="oplistTokenInput" type="password" name="oplistToken" value="" placeholder="{{if .TokenIsSet}}{{.T "secret.placeholderSetKeep"}}{{else}}{{.T "secret.placeholderNotSet"}}{{end}}" />
-          <div class="hint hint-line">
-            <span>{{.T "sakuya.oplist.tokenHint"}}</span>
-            <span class="spacer"></span>
-            <label class="pill" style="font-weight:800;">
-              <input type="checkbox" data-toggle-password="#oplistTokenInput" />
-              {{.T "common.show"}}
-            </label>
-            <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-              <input type="checkbox" name="clearOplistToken" />
-              {{.T "common.clear"}}
-            </label>
+            {{end}}
           </div>
         </div>
+      </section>
+      {{template "savebar" (dict "Root" $)}}
+    </form>
 
-        <div class="field">
-          <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-            <input type="checkbox" name="serviceEnabled" {{if .ServiceEnabled}}checked{{end}} />
-            <input type="hidden" name="serviceEnabled" value="0" />
-            {{.T "common.enableService"}} <span class="key">{{if ne .CurrentInstanceID ""}}sakuya.instances[].disabled{{else}}sakuya.oplist.disabled{{end}}</span>
-          </label>
-          <div class="hint">{{.T "sakuya.serviceToggleHint"}}</div>
+    <section class="panel" role="tabpanel" data-hz-panel="instances" id="sakuya-instances" hidden>
+      <div class="card flush">
+        <div class="card-head">
+          <div class="card-head-text">
+            <div class="card-title"><svg class="icon"><use href="#i-layers"/></svg>{{.T "sakuya.instances.title"}}</div>
+            <div class="card-sub">{{.T "sakuya.instances.hint"}}</div>
+          </div>
         </div>
-
-        <div class="btn-row" id="sakuya-save">
-          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
+        <div class="table-wrap">
+          <table class="table stack">
+            <thead>
+              <tr>
+                <th>{{.T "common.name"}}</th>
+                <th>{{.T "sakuya.instances.prefix"}}</th>
+                <th>{{.T "sakuya.instances.address"}}</th>
+                <th>{{.T "common.status"}}</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Instances}}
+                <tr>
+                  <td class="cell-main">{{.Name}}</td>
+                  <td data-label="{{$.T "sakuya.instances.prefix"}}">{{if .Prefix}}<code>/{{.Prefix}}</code>{{else}}<span class="muted">{{$.T "common.default"}}</span>{{end}}</td>
+                  <td data-label="{{$.T "sakuya.instances.address"}}"><span class="ellipsis" title="{{.Address}}">{{if .Address}}{{.Address}}{{else}}-{{end}}</span></td>
+                  <td data-label="{{$.T "common.status"}}">{{if .Enabled}}<span class="pill ok">{{$.T "common.enabled"}}</span>{{else}}<span class="pill off">{{$.T "common.disabled"}}</span>{{end}}</td>
+                  <td class="actions">
+                    <div class="btn-row">
+                      <a class="btn sm" href="{{if eq .ID "default"}}/config/sakuya/oplist{{else}}/config/sakuya/oplist?instance={{.ID}}{{end}}"><svg class="icon"><use href="#i-sliders"/></svg>{{$.T "common.edit"}}</a>
+                      <a class="btn sm square" href="{{.ServiceURL}}" target="_blank" rel="noreferrer" title="{{$.T "common.open"}}" aria-label="{{$.T "common.open"}}"><svg class="icon"><use href="#i-external"/></svg></a>
+                      <button class="btn sm square" type="button" data-hz-copy="1" data-hz-copy-text="{{.ExampleURL}}" title="{{$.T "common.copy"}}" aria-label="{{$.T "common.copy"}}"><svg class="icon"><use href="#i-copy"/></svg></button>
+                      {{if ne .ID "default"}}
+                        <form method="post" action="/config/sakuya/oplist" class="m0" data-hz-pjax>
+                          <input type="hidden" name="action" value="deleteInstance" />
+                          <input type="hidden" name="instanceID" value="{{.ID}}" />
+                          <button class="btn sm square danger-ghost" type="submit" title="{{$.T "common.delete"}}" aria-label="{{$.T "common.delete"}}" data-confirm-submit="{{$.T "sakuya.instances.confirmDelete" .Prefix}}" data-confirm-ok="{{$.T "common.delete"}}"><svg class="icon"><use href="#i-trash"/></svg></button>
+                        </form>
+                      {{end}}
+                    </div>
+                  </td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
         </div>
       </div>
-    </form>
+
+      <form class="card m0" method="post" action="/config/sakuya/oplist" data-hz-pjax>
+        <input type="hidden" name="action" value="addInstance" />
+        <div class="card-head"><div class="card-title"><svg class="icon"><use href="#i-plus"/></svg>{{.T "sakuya.instances.addTitle"}}</div></div>
+        <div class="fields">
+          <div class="field">
+            <label class="label" for="s-new-prefix">{{.T "sakuya.instances.prefixLabel"}}</label>
+            <input id="s-new-prefix" type="text" name="newInstancePrefix" value="" placeholder="op1" required />
+            <div class="hint">{{.T "sakuya.instances.prefixHint"}}</div>
+          </div>
+          <div class="field">
+            <label class="label" for="s-new-name">{{.T "common.name"}} <span class="opt">{{.T "common.optionalTag"}}</span></label>
+            <input id="s-new-name" type="text" name="newInstanceName" value="" placeholder="{{.T "sakuya.instances.namePlaceholder"}}" />
+          </div>
+        </div>
+        <div class="switches one">
+          <label class="switch-row">
+            <span class="switch-text">
+              <span class="switch-title">{{.T "sakuya.instances.ignoreDup"}}</span>
+              <span class="hint">{{.T "sakuya.instances.ignoreDupHint"}}</span>
+            </span>
+            <input class="switch" type="checkbox" name="ignoreDuplicatePrefix" />
+          </label>
+        </div>
+        <div class="card-foot">
+          <button class="btn primary" type="submit"><svg class="icon"><use href="#i-plus"/></svg>{{.T "common.add"}}</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel" role="tabpanel" data-hz-panel="global" id="sakuya-global" hidden>
+      <form class="card narrow m0" method="post" action="/config/sakuya/oplist" data-hz-pjax>
+        <input type="hidden" name="action" value="updateGlobal" />
+        <input type="hidden" name="returnInstance" value="{{.CurrentInstanceID}}" />
+        <div class="card-head">
+          <div class="card-head-text">
+            <div class="card-title"><svg class="icon"><use href="#i-globe"/></svg>{{.T "sakuya.globalLabel"}}</div>
+            <div class="card-sub">{{.T "sakuya.globalHint"}}</div>
+          </div>
+        </div>
+        <div class="switches one">
+          <label class="switch-row">
+            <span class="switch-text"><span class="switch-title">{{.T "sakuya.globalSwitchShort"}} <span class="key">sakuya.disabled</span></span></span>
+            <input class="switch" type="checkbox" name="sakuyaEnabled" {{if .SakuyaEnabled}}checked{{end}} />
+            <input type="hidden" name="sakuyaEnabled" value="0" />
+          </label>
+        </div>
+        <div class="fields one form-note">
+          <div class="field">
+            <label class="label" for="s-port">{{.T "common.port"}} <span class="key">ports.sakuya</span></label>
+            <input id="s-port" type="text" inputmode="numeric" name="sakuyaPort" value="{{.SakuyaPortValue}}" placeholder="3200" />
+            <div class="hint">{{.T "common.modifiedPortRestart"}}</div>
+          </div>
+        </div>
+        <div class="card-foot">
+          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
+        </div>
+      </form>
+    </section>
   </div>
 {{end}}

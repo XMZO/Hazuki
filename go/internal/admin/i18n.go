@@ -436,6 +436,19 @@ func init() {
 		"nav.export":     "下载备份",
 		"nav.account":    "账号",
 
+		"nav.section.monitor": "监控",
+		"nav.section.manage":  "管理",
+		"nav.redisCache":      "Redis 缓存",
+
+		"ui.brandSub":        "管理面板",
+		"ui.close":           "关闭",
+		"ui.unsaved":         "有未保存的更改",
+		"ui.tab.overview":    "概况",
+		"ui.tab.security":    "安全",
+		"ui.tab.preferences": "偏好",
+		"ui.tab.diagnostics": "请求诊断",
+		"ui.tab.global":      "全局",
+
 		"status.error":    "异常",
 		"status.disabled": "未启用",
 		"status.ok":       "正常 · %dms",
@@ -664,6 +677,16 @@ func init() {
 		"js.theme.dark":          "暗色",
 		"js.theme.light":         "亮色",
 		"js.theme.toggleHint":    "主题：{mode}（点击切换）",
+
+		"js.ui.close":       "关闭",
+		"js.unsaved.title":  "放弃未保存的更改？",
+		"js.unsaved.detail": "当前页面有尚未保存的修改，离开后这些修改会丢失。",
+		"js.unsaved.leave":  "离开",
+		"js.request.failed": "请求失败，请检查网络后重试。",
+		"js.traffic.out":    "出站",
+		"js.traffic.in":     "入站",
+		"js.traffic.req":    "请求数",
+		"js.traffic.empty":  "暂无数据",
 
 		"redisCache.subtitle":             "查看/清理 Hazuki 的 Redis 缓存（用于 jsDelivr 缓存；可选用于 Torcherino 小静态缓存）。",
 		"redisCache.namespaceLabel":       "范围",
@@ -1155,6 +1178,19 @@ func init() {
 		"nav.export":     "Download backup",
 		"nav.account":    "Account",
 
+		"nav.section.monitor": "Monitor",
+		"nav.section.manage":  "Manage",
+		"nav.redisCache":      "Redis cache",
+
+		"ui.brandSub":        "Admin console",
+		"ui.close":           "Close",
+		"ui.unsaved":         "Unsaved changes",
+		"ui.tab.overview":    "Overview",
+		"ui.tab.security":    "Security",
+		"ui.tab.preferences": "Preferences",
+		"ui.tab.diagnostics": "Request info",
+		"ui.tab.global":      "Global",
+
 		"status.error":    "Error",
 		"status.disabled": "Disabled",
 		"status.ok":       "OK · %dms",
@@ -1383,6 +1419,16 @@ func init() {
 		"js.theme.dark":          "Dark",
 		"js.theme.light":         "Light",
 		"js.theme.toggleHint":    "Theme: {mode} (click to toggle)",
+
+		"js.ui.close":       "Close",
+		"js.unsaved.title":  "Discard unsaved changes?",
+		"js.unsaved.detail": "This page has changes that have not been saved. They will be lost if you leave.",
+		"js.unsaved.leave":  "Leave",
+		"js.request.failed": "Request failed. Check your connection and try again.",
+		"js.traffic.out":    "Out",
+		"js.traffic.in":     "In",
+		"js.traffic.req":    "Requests",
+		"js.traffic.empty":  "No data yet",
 
 		"redisCache.subtitle":             "View and clear Hazuki Redis cache (used for jsDelivr cache; optionally used for Torcherino small static cache).",
 		"redisCache.namespaceLabel":       "Scope",

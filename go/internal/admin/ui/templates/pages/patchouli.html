@@ -1,131 +1,104 @@
 {{define "patchouli"}}
-  <div class="grid">
-    <div class="card hz-anchor" id="patchouli-overview">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "patchouli.subtitle"}}</div>
-      <div class="btn-row">
-        <span class="pill">{{.T "common.serviceUrl"}}：<code>{{.PatchouliBaseURL}}</code></span>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}}</h1>
+        <p class="page-desc">{{.T "patchouli.subtitle"}}</p>
+      </div>
+      <div class="page-actions">
         {{if .PatchouliStatus.Status}}{{template "serviceStatusPill" (statusCtx $ .PatchouliStatus)}}{{end}}
-        <a class="btn" href="{{.PatchouliHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.openHealth"}}</a>
+        {{template "copyChip" (dict "Text" .PatchouliBaseURL "Title" (.T "common.serviceUrl"))}}
+        <a class="btn sm" href="{{.PatchouliHealthURL}}" target="_blank" rel="noreferrer"><svg class="icon"><use href="#i-pulse"/></svg>{{.T "common.health"}}</a>
       </div>
-      {{if and (eq .PatchouliStatus.Status "error") .PatchouliStatus.Error}}
-        <div class="muted small" style="margin-top:10px;">{{.T "common.healthErrorPrefix"}}：{{.PatchouliStatus.Error}}</div>
-      {{end}}
-      <div class="btn-row hz-page-jump">
-        <a class="btn" href="#patchouli-basic">{{.T "common.basicConfig"}}</a>
-        <a class="btn" href="#patchouli-auth">{{.T "patchouli.authTitle"}}</a>
-        <a class="btn" href="#patchouli-redirect">{{.T "patchouli.redirectTitle"}}</a>
-        <a class="btn" href="#patchouli-save">{{.T "common.save"}}</a>
-      </div>
-    </div>
+    </header>
+    {{if and (eq .PatchouliStatus.Status "error") .PatchouliStatus.Error}}
+      <div class="callout err"><svg class="icon"><use href="#i-alert"/></svg><div class="callout-body">{{.T "common.healthErrorPrefix"}}：{{.PatchouliStatus.Error}}</div></div>
+    {{end}}
 
-    <form class="form" method="post" action="/config/patchouli">
-      <div class="card hz-anchor" id="patchouli-basic">
-        <h3>{{.T "common.basicConfig"}}</h3>
+    <nav class="tabs" role="tablist" data-hz-tabs aria-label="{{.Title}}">
+      <button class="tab" type="button" role="tab" data-hz-tab="basic" aria-selected="true"><svg class="icon"><use href="#i-sliders"/></svg>{{.T "common.basicConfig"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="auth" aria-selected="false"><svg class="icon"><use href="#i-key"/></svg>{{.T "patchouli.authTitle"}}</button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
 
-        <div class="grid cols-2">
-          <div class="field">
-            <label>{{.T "common.port"}} <span class="key">ports.patchouli</span></label>
-            <input type="text" name="patchouliPort" value="{{.PatchouliPortValue}}" placeholder="3201" />
-            <div class="hint">{{.T "patchouli.portHint"}}</div>
+    <form class="tab-form" method="post" action="/config/patchouli" data-hz-tabform data-hz-dirty data-hz-pjax>
+      <section class="panel" role="tabpanel" data-hz-panel="basic" id="patchouli-basic">
+        <div class="card">
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="p-port">{{.T "common.port"}} <span class="key">ports.patchouli</span></label>
+              <input id="p-port" type="text" inputmode="numeric" name="patchouliPort" value="{{.PatchouliPortValue}}" placeholder="3201" />
+              <div class="hint">{{.T "patchouli.portHint"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="p-repo">{{.T "patchouli.repoLabel"}}</label>
+              <input id="p-repo" type="text" name="repo" value="{{.Patchouli.Repo}}" placeholder="username/repo" />
+              <div class="hint">{{.T "patchouli.repoHint"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="p-kind">{{.T "patchouli.kindLabel"}}</label>
+              <select id="p-kind" name="kind">
+                <option value="dataset" {{if eq .KindValue "dataset"}}selected{{end}}>{{.T "patchouli.kind.dataset"}}</option>
+                <option value="model" {{if eq .KindValue "model"}}selected{{end}}>{{.T "patchouli.kind.model"}}</option>
+                <option value="space" {{if eq .KindValue "space"}}selected{{end}}>{{.T "patchouli.kind.space"}}</option>
+              </select>
+              <div class="hint">{{.T "patchouli.kindHint"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="p-rev">{{.T "patchouli.revisionLabel"}} <span class="opt">{{.T "common.optionalTag"}}</span></label>
+              <input id="p-rev" type="text" name="revision" value="{{.Patchouli.Revision}}" placeholder="main" />
+              <div class="hint">{{.T "patchouli.revisionHint"}}</div>
+            </div>
           </div>
-          <div class="field">
-            <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-              <input type="checkbox" name="serviceEnabled" {{if .PatchouliEnabled}}checked{{end}} />
+          <div class="switches">
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "common.enableService"}} <span class="key">patchouli.disabled</span></span>
+                <span class="hint">{{.T "patchouli.serviceToggleHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="serviceEnabled" {{if .PatchouliEnabled}}checked{{end}} />
               <input type="hidden" name="serviceEnabled" value="0" />
-              {{.T "common.enableService"}} <span class="key">patchouli.disabled</span>
             </label>
-            <div class="hint">{{.T "patchouli.serviceToggleHint"}}</div>
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "patchouli.disableCacheLabel"}}</span>
+                <span class="hint">{{.T "patchouli.disableCacheHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="disableCache" {{if .Patchouli.DisableCache}}checked{{end}} />
+            </label>
           </div>
         </div>
+      </section>
 
-        <div class="grid cols-2">
-          <div class="field">
-            <label>{{.T "patchouli.kindLabel"}}</label>
-            <select name="kind">
-              <option value="dataset" {{if eq .KindValue "dataset"}}selected{{end}}>{{.T "patchouli.kind.dataset"}}</option>
-              <option value="model" {{if eq .KindValue "model"}}selected{{end}}>{{.T "patchouli.kind.model"}}</option>
-              <option value="space" {{if eq .KindValue "space"}}selected{{end}}>{{.T "patchouli.kind.space"}}</option>
-            </select>
-            <div class="hint">{{.T "patchouli.kindHint"}}</div>
-          </div>
-          <div class="field">
-            <label>{{.T "patchouli.revisionLabel"}} {{.T "common.optionalTag"}}</label>
-            <input type="text" name="revision" value="{{.Patchouli.Revision}}" placeholder="main" />
-            <div class="hint">{{.T "patchouli.revisionHint"}}</div>
-          </div>
-        </div>
-
-        <div class="field">
-          <label>{{.T "patchouli.repoLabel"}}</label>
-          <input type="text" name="repo" value="{{.Patchouli.Repo}}" placeholder="username/repo" />
-          <div class="hint">{{.T "patchouli.repoHint"}}</div>
-        </div>
-
-        <div class="field">
-          <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-            <input type="checkbox" name="disableCache" {{if .Patchouli.DisableCache}}checked{{end}} />
-            {{.T "patchouli.disableCacheLabel"}}
-          </label>
-          <div class="hint">{{.T "patchouli.disableCacheHint"}}</div>
-        </div>
-      </div>
-
-      <details class="card accordion hz-anchor" id="patchouli-auth">
-        <summary>{{.T "patchouli.authTitle"}}</summary>
-        <div class="body">
-          <div class="field">
-            <label>{{.T "patchouli.tokenLabel"}} <span class="muted small">{{.T "patchouli.tokenTag"}}</span></label>
-            <input id="patchouliTokenInput" type="password" name="token" value="" placeholder="{{if .TokenIsSet}}{{.T "secret.placeholderSetKeep"}}{{else}}{{.T "secret.placeholderNotSet"}}{{end}}" />
-            <div class="hint hint-line">
-              <span>{{.T "patchouli.tokenHint"}}</span>
-              <span class="spacer"></span>
-              <label class="pill" style="font-weight:800;">
-                <input type="checkbox" data-toggle-password="#patchouliTokenInput" />
-                {{.T "common.show"}}
-              </label>
-              <label style="display:inline-flex; gap:8px; align-items:center; font-weight:800;">
-                <input type="checkbox" name="clearToken" />
-                {{.T "common.clear"}}
-              </label>
+      <section class="panel" role="tabpanel" data-hz-panel="auth" id="patchouli-auth" hidden>
+        <div class="card">
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="patchouliTokenInput">{{.T "patchouli.tokenLabel"}} <span class="opt">{{.T "patchouli.tokenTag"}}</span></label>
+              {{template "secretInput" (dict "Root" $ "ID" "patchouliTokenInput" "Name" "token" "Placeholder" (or (and .TokenIsSet (.T "secret.placeholderSetKeep")) (.T "secret.placeholderNotSet")))}}
+              <div class="hint-row">
+                <span class="hint">{{.T "patchouli.tokenHint"}}</span>
+                <label class="check"><input type="checkbox" name="clearToken" />{{.T "common.clear"}}</label>
+              </div>
             </div>
-          </div>
-
-          <div class="field">
-            <label>{{.T "patchouli.accessKeyLabel"}} {{.T "common.optionalTag"}}</label>
-            <input id="patchouliAccessKeyInput" type="password" name="accessKey" value="" placeholder="{{if .AccessKeyIsSet}}{{.T "secret.placeholderSetKeep"}}{{else}}{{.T "secret.placeholderNotSet"}}{{end}}" />
-            <div class="hint hint-line">
-              <span>{{.T "patchouli.accessKeyHint"}}</span>
-              <span class="spacer"></span>
-              <label class="pill" style="font-weight:800;">
-                <input type="checkbox" data-toggle-password="#patchouliAccessKeyInput" />
-                {{.T "common.show"}}
-              </label>
-              <label style="display:inline-flex; gap:8px; align-items:center; font-weight:800;">
-                <input type="checkbox" name="clearAccessKey" />
-                {{.T "common.clear"}}
-              </label>
+            <div class="field">
+              <label class="label" for="patchouliAccessKeyInput">{{.T "patchouli.accessKeyLabel"}} <span class="opt">{{.T "common.optionalTag"}}</span></label>
+              {{template "secretInput" (dict "Root" $ "ID" "patchouliAccessKeyInput" "Name" "accessKey" "Placeholder" (or (and .AccessKeyIsSet (.T "secret.placeholderSetKeep")) (.T "secret.placeholderNotSet")))}}
+              <div class="hint-row">
+                <span class="hint">{{.T "patchouli.accessKeyHint"}}</span>
+                <label class="check"><input type="checkbox" name="clearAccessKey" />{{.T "common.clear"}}</label>
+              </div>
+            </div>
+            <div class="field full" id="patchouli-redirect">
+              <label class="label" for="p-redir">{{.T "patchouli.redirectTitle"}} · {{.T "patchouli.redirectAllowListLabel"}} <span class="opt">{{.T "common.optionalTag"}}</span></label>
+              <input id="p-redir" type="text" name="allowedRedirectHostSuffixes" value="{{.AllowedRedirectHostSuffixesCsv}}" placeholder=".huggingface.co, .hf.co" />
+              <div class="hint">{{.T "patchouli.redirectAllowListHint"}}</div>
             </div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="patchouli-redirect">
-        <summary>{{.T "patchouli.redirectTitle"}}</summary>
-        <div class="body">
-          <div class="field">
-            <label>{{.T "patchouli.redirectAllowListLabel"}} {{.T "common.optionalTag"}}</label>
-            <input type="text" name="allowedRedirectHostSuffixes" value="{{.AllowedRedirectHostSuffixesCsv}}" placeholder=".huggingface.co, .hf.co" />
-            <div class="hint">{{.T "patchouli.redirectAllowListHint"}}</div>
-          </div>
-        </div>
-      </details>
-
-      <div class="card hz-anchor" id="patchouli-save">
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
-        </div>
-      </div>
+      {{template "savebar" (dict "Root" $)}}
     </form>
   </div>
 {{end}}

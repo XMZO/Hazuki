@@ -1,161 +1,163 @@
 {{define "cdnjs"}}
-  <div class="grid">
-    <div class="card hz-anchor" id="cdnjs-overview">
-      <h2>{{.Title}} <span class="muted small">{{.T "cdnjs.tagline"}}</span></h2>
-      <div class="muted small">{{.T "cdnjs.proxyPrefix"}} <code>{{.Cdnjs.AssetURL}}</code> {{.T "cdnjs.proxySuffix"}}</div>
-      <div class="btn-row">
-        <span class="pill">{{.T "common.serviceUrl"}}：<code>{{.CdnjsBaseURL}}</code></span>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}} <span class="tag">{{.T "cdnjs.tagline"}}</span></h1>
+        <p class="page-desc">{{.T "cdnjs.proxyPrefix"}} <code>{{.Cdnjs.AssetURL}}</code> {{.T "cdnjs.proxySuffix"}}</p>
+      </div>
+      <div class="page-actions">
         {{if .CdnjsStatus.Status}}{{template "serviceStatusPill" (statusCtx $ .CdnjsStatus)}}{{end}}
-        <a class="btn" href="{{.CdnjsHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.openHealth"}}</a>
+        {{template "copyChip" (dict "Text" .CdnjsBaseURL "Title" (.T "common.serviceUrl"))}}
+        <a class="btn sm" href="{{.CdnjsHealthURL}}" target="_blank" rel="noreferrer"><svg class="icon"><use href="#i-pulse"/></svg>{{.T "common.health"}}</a>
       </div>
-      {{if and (eq .CdnjsStatus.Status "error") .CdnjsStatus.Error}}
-        <div class="muted small" style="margin-top:10px;">{{.T "common.healthErrorPrefix"}}：{{.CdnjsStatus.Error}}</div>
-      {{end}}
-      <div class="muted small" style="margin-top:10px;">
-        {{.T "cdnjs.usage"}}：<code>{{.CdnjsBaseURL}}/gh/&lt;user&gt;/&lt;repo@ref/path&gt;</code> {{.T "common.or"}} <code>{{.CdnjsBaseURL}}/&lt;repo@ref/path&gt;</code>（{{.T "cdnjs.usageDefaultUser" }}）
-      </div>
-      <div class="btn-row hz-page-jump">
-        <a class="btn" href="#cdnjs-basic">{{.T "common.basicConfig"}}</a>
-        <a class="btn" href="#cdnjs-access">{{.T "common.accessRules"}}</a>
-        <a class="btn" href="#cdnjs-redis">{{.T "cdnjs.redisTitle"}}</a>
-        <a class="btn" href="#cdnjs-ttl">{{.T "cdnjs.ttlTitle"}}</a>
-        <a class="btn" href="#cdnjs-save">{{.T "common.save"}}</a>
-      </div>
-    </div>
+    </header>
+    {{if and (eq .CdnjsStatus.Status "error") .CdnjsStatus.Error}}
+      <div class="callout err"><svg class="icon"><use href="#i-alert"/></svg><div class="callout-body">{{.T "common.healthErrorPrefix"}}：{{.CdnjsStatus.Error}}</div></div>
+    {{end}}
 
-    <form class="form" method="post" action="/config/cdnjs">
-      <div class="card hz-anchor" id="cdnjs-basic">
-        <h3>{{.T "common.basicConfig"}}</h3>
-        <div class="grid cols-2">
-          <div class="field">
-            <label>{{.T "common.port"}} <span class="key">ports.cdnjs</span></label>
-            <input type="text" name="cdnjsPort" value="{{.CdnjsPortValue}}" placeholder="3001" />
-            <div class="hint">{{.T "common.modifiedPortRestart"}}</div>
-          </div>
-          <div class="field">
-            <label>{{.T "cdnjs.assetUrlLabel"}} <span class="key">ASSET_URL</span></label>
-            <input type="text" name="assetUrl" value="{{.Cdnjs.AssetURL}}" placeholder="https://cdn.jsdelivr.net" required />
-            <div class="hint">{{.T "common.usuallyNoNeedChange"}}</div>
-          </div>
-        </div>
-        <div class="field">
-          <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-            <input type="checkbox" name="serviceEnabled" {{if not .Cdnjs.Disabled}}checked{{end}} />
-            <input type="hidden" name="serviceEnabled" value="0" />
-            {{.T "common.enableService"}} <span class="key">cdnjs.disabled</span>
-          </label>
-          <div class="hint">{{.T "cdnjs.serviceToggleHint"}}</div>
-        </div>
-      </div>
+    <nav class="tabs" role="tablist" data-hz-tabs aria-label="{{.Title}}">
+      <button class="tab" type="button" role="tab" data-hz-tab="basic" aria-selected="true"><svg class="icon"><use href="#i-sliders"/></svg>{{.T "common.basicConfig"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="access" aria-selected="false"><svg class="icon"><use href="#i-filter"/></svg>{{.T "common.accessRules"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="redis" aria-selected="false"><svg class="icon"><use href="#i-database"/></svg>{{.T "cdnjs.redisTitle"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="ttl" aria-selected="false"><svg class="icon"><use href="#i-clock"/></svg>{{.T "cdnjs.ttlTitle"}}</button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
 
-      <details class="card accordion hz-anchor" id="cdnjs-access">
-        <summary>{{.T "common.accessRules"}} <span class="muted small">{{.T "common.githubUsersTag"}}</span></summary>
-        <div class="body">
-          <div class="field">
-            <label>{{.T "cdnjs.ghUserPolicyLabel"}} <span class="key">GH_USER_POLICY</span></label>
-            <select name="ghUserPolicy">
-              <option value="allowlist" {{if eq .GhUserPolicyValue "allowlist"}}selected{{end}}>{{.T "cdnjs.policy.allowlist"}}</option>
-              <option value="denylist" {{if eq .GhUserPolicyValue "denylist"}}selected{{end}}>{{.T "cdnjs.policy.denylist"}}</option>
-            </select>
-            <div class="hint">
-              <code>allowlist</code>{{.T "cdnjs.ghUserPolicyHintAllowlist"}} <code>ALLOWED_GH_USERS</code>{{.T "common.semicolon"}}<code>denylist</code>{{.T "cdnjs.ghUserPolicyHintDenylist"}} <code>BLOCKED_GH_USERS</code>{{.T "common.period"}}
+    <form class="tab-form" method="post" action="/config/cdnjs" data-hz-tabform data-hz-dirty data-hz-pjax>
+      <section class="panel" role="tabpanel" data-hz-panel="basic" id="cdnjs-basic">
+        <div class="card">
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="c-port">{{.T "common.port"}} <span class="key">ports.cdnjs</span></label>
+              <input id="c-port" type="text" inputmode="numeric" name="cdnjsPort" value="{{.CdnjsPortValue}}" placeholder="3001" />
+              <div class="hint">{{.T "common.modifiedPortRestart"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="c-asset">{{.T "cdnjs.assetUrlLabel"}} <span class="key">ASSET_URL</span></label>
+              <input id="c-asset" type="text" name="assetUrl" value="{{.Cdnjs.AssetURL}}" placeholder="https://cdn.jsdelivr.net" required />
+              <div class="hint">{{.T "common.usuallyNoNeedChange"}}</div>
             </div>
           </div>
-
-          <div class="field">
-            <label>{{.T "cdnjs.defaultUserLabel"}} <span class="key">DEFAULT_GH_USER</span></label>
-            <input type="text" name="defaultGhUser" value="{{.Cdnjs.DefaultGhUser}}" placeholder="XMZO" />
-            <div class="hint">{{.T "cdnjs.defaultUserHintPrefix"}} <code>/repo@ref/path</code> {{.T "cdnjs.defaultUserHintMiddle"}} <code>/gh/DEFAULT_GH_USER/repo@ref/path</code>{{.T "common.period"}}</div>
+          <div class="switches one">
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "common.enableService"}} <span class="key">cdnjs.disabled</span></span>
+                <span class="hint">{{.T "cdnjs.serviceToggleHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="serviceEnabled" {{if not .Cdnjs.Disabled}}checked{{end}} />
+              <input type="hidden" name="serviceEnabled" value="0" />
+            </label>
           </div>
-          <div class="field">
-            <label>{{.T "cdnjs.allowedUsersLabel"}} <span class="key">ALLOWED_GH_USERS</span></label>
-            <input type="text" name="allowedGhUsers" value="{{.AllowedUsersCsv}}" placeholder="XMZO,starsei" />
-            <div class="hint">{{.T "cdnjs.allowedUsersHintPrefix"}} <code>/gh/&lt;user&gt;/...</code> {{.T "common.commaSeparatedCaseInsensitive"}} {{.T "common.semicolon"}}{{.T "cdnjs.allowedUsersHintSuffix"}} <code>/gh/*</code>{{.T "common.period"}}</div>
-          </div>
-          <div class="field">
-            <label>{{.T "cdnjs.blockedUsersLabel"}} <span class="key">BLOCKED_GH_USERS</span></label>
-            <input type="text" name="blockedGhUsers" value="{{.BlockedUsersCsv}}" placeholder="baduser1,baduser2" />
-            <div class="hint">{{.T "cdnjs.blockedUsersHintPrefix"}} <code>/gh/*</code>{{.T "cdnjs.blockedUsersHintSuffix"}}{{.T "common.period"}}</div>
+          <div class="callout form-note">
+            <svg class="icon"><use href="#i-info"/></svg>
+            <div class="callout-body">
+              <div class="callout-title">{{.T "cdnjs.usage"}}</div>
+              <div><code>{{.CdnjsBaseURL}}/gh/&lt;user&gt;/&lt;repo@ref/path&gt;</code></div>
+              <div>{{.T "common.or"}} <code>{{.CdnjsBaseURL}}/&lt;repo@ref/path&gt;</code>（{{.T "cdnjs.usageDefaultUser"}}）</div>
+            </div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="cdnjs-redis">
-        <summary>{{.T "cdnjs.redisTitle"}}</summary>
-        <div class="body">
+      <section class="panel" role="tabpanel" data-hz-panel="access" id="cdnjs-access" hidden>
+        <div class="card">
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="c-policy">{{.T "cdnjs.ghUserPolicyLabel"}} <span class="key">GH_USER_POLICY</span></label>
+              <select id="c-policy" name="ghUserPolicy">
+                <option value="allowlist" {{if eq .GhUserPolicyValue "allowlist"}}selected{{end}}>{{.T "cdnjs.policy.allowlist"}}</option>
+                <option value="denylist" {{if eq .GhUserPolicyValue "denylist"}}selected{{end}}>{{.T "cdnjs.policy.denylist"}}</option>
+              </select>
+              <div class="hint"><code>allowlist</code>{{.T "cdnjs.ghUserPolicyHintAllowlist"}} <code>ALLOWED_GH_USERS</code>{{.T "common.semicolon"}}<code>denylist</code>{{.T "cdnjs.ghUserPolicyHintDenylist"}} <code>BLOCKED_GH_USERS</code>{{.T "common.period"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="c-defuser">{{.T "cdnjs.defaultUserLabel"}} <span class="key">DEFAULT_GH_USER</span></label>
+              <input id="c-defuser" type="text" name="defaultGhUser" value="{{.Cdnjs.DefaultGhUser}}" placeholder="XMZO" />
+              <div class="hint">{{.T "cdnjs.defaultUserHintPrefix"}} <code>/repo@ref/path</code> {{.T "cdnjs.defaultUserHintMiddle"}} <code>/gh/DEFAULT_GH_USER/repo@ref/path</code>{{.T "common.period"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="c-allowed">{{.T "cdnjs.allowedUsersLabel"}} <span class="key">ALLOWED_GH_USERS</span></label>
+              <input id="c-allowed" type="text" name="allowedGhUsers" value="{{.AllowedUsersCsv}}" placeholder="XMZO,starsei" />
+              <div class="hint">{{.T "cdnjs.allowedUsersHintPrefix"}} <code>/gh/&lt;user&gt;/...</code> {{.T "common.commaSeparatedCaseInsensitive"}} {{.T "common.semicolon"}}{{.T "cdnjs.allowedUsersHintSuffix"}} <code>/gh/*</code>{{.T "common.period"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="c-blocked">{{.T "cdnjs.blockedUsersLabel"}} <span class="key">BLOCKED_GH_USERS</span></label>
+              <input id="c-blocked" type="text" name="blockedGhUsers" value="{{.BlockedUsersCsv}}" placeholder="baduser1,baduser2" />
+              <div class="hint">{{.T "cdnjs.blockedUsersHintPrefix"}} <code>/gh/*</code>{{.T "cdnjs.blockedUsersHintSuffix"}}{{.T "common.period"}}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" role="tabpanel" data-hz-panel="redis" id="cdnjs-redis" hidden>
+        <div class="card">
           {{if .RedisStatus.Status}}
-            {{if eq .RedisStatus.Status "ok"}}
-              <div class="pill ok">{{.T "redis.ok"}} · {{.RedisStatus.LatencyMS}}ms · <code>{{.RedisStatus.Addr}}</code></div>
-              {{if or .RedisStatus.ServerVersion .RedisStatus.UsedMemoryHuman (gt .RedisStatus.DBSize 0)}}
-                <div class="muted small" style="margin-top:8px;">
-                  {{if .RedisStatus.ServerVersion}}v{{.RedisStatus.ServerVersion}}{{end}}
-                  {{if gt .RedisStatus.DBSize 0}} · <code>{{.RedisStatus.DBSize}}</code> keys{{end}}
-                  {{if .RedisStatus.UsedMemoryHuman}} · {{.RedisStatus.UsedMemoryHuman}}{{end}}
-                  {{if gt .RedisStatus.ConnectedClients 0}} · clients <code>{{.RedisStatus.ConnectedClients}}</code>{{end}}
-                </div>
-              {{end}}
-            {{else if eq .RedisStatus.Status "error"}}
-              <div class="pill err">{{.T "redis.error"}} · <code>{{.RedisStatus.Addr}}</code></div>
-              {{if .RedisStatus.Error}}<div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.RedisStatus.Error}}</div>{{end}}
-            {{else}}
-              <div class="pill">{{.T "redis.notConfigured"}}</div>
+            <div class="card-head">
+              <div class="meta-row">
+                {{template "redisStatusPill" (dict "Root" $ "Status" .RedisStatus)}}
+                {{if .RedisStatus.Addr}}<code>{{.RedisStatus.Addr}}</code>{{end}}
+                {{if eq .RedisStatus.Status "ok"}}
+                  <span class="muted small">
+                    {{if .RedisStatus.ServerVersion}}v{{.RedisStatus.ServerVersion}}{{end}}
+                    {{if gt .RedisStatus.DBSize 0}} · {{.RedisStatus.DBSize}} keys{{end}}
+                    {{if .RedisStatus.UsedMemoryHuman}} · {{.RedisStatus.UsedMemoryHuman}}{{end}}
+                    {{if gt .RedisStatus.ConnectedClients 0}} · clients {{.RedisStatus.ConnectedClients}}{{end}}
+                  </span>
+                {{end}}
+              </div>
+            </div>
+            {{if and (eq .RedisStatus.Status "error") .RedisStatus.Error}}
+              <div class="callout err" style="margin-bottom:16px"><svg class="icon"><use href="#i-alert"/></svg><div class="callout-body">{{.T "common.errorPrefix"}}：{{.RedisStatus.Error}}</div></div>
             {{end}}
           {{end}}
-
-          <div class="grid cols-2">
+          <div class="fields">
             <div class="field">
-              <label>Host <span class="key">REDIS_HOST</span></label>
-              <input type="text" name="redisHost" value="{{.Cdnjs.Redis.Host}}" placeholder="redis" />
+              <label class="label" for="c-rhost">Host <span class="key">REDIS_HOST</span></label>
+              <input id="c-rhost" type="text" name="redisHost" value="{{.Cdnjs.Redis.Host}}" placeholder="redis" />
               <div class="hint">{{.T "cdnjs.redisHostHintPrefix"}} <code>redis</code>{{.T "common.semicolon"}}{{.T "cdnjs.redisHostHintSuffix"}} <code>127.0.0.1</code>{{.T "common.period"}}</div>
             </div>
             <div class="field">
-              <label>Port <span class="key">REDIS_PORT</span></label>
-              <input type="text" name="redisPort" value="{{.RedisPortValue}}" placeholder="6379" />
+              <label class="label" for="c-rport">Port <span class="key">REDIS_PORT</span></label>
+              <input id="c-rport" type="text" inputmode="numeric" name="redisPort" value="{{.RedisPortValue}}" placeholder="6379" />
             </div>
           </div>
-          <div class="muted small">{{.T "cdnjs.redisKeyHintPrefix"}} <code>:type</code> {{.T "cdnjs.redisKeyHintSuffix"}}</div>
+          <p class="hint form-note">{{.T "cdnjs.redisKeyHintPrefix"}} <code>:type</code> {{.T "cdnjs.redisKeyHintSuffix"}}</p>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="cdnjs-ttl">
-        <summary>{{.T "cdnjs.ttlTitle"}}</summary>
-        <div class="body">
-          <div class="muted small">{{.T "cdnjs.ttlDefaultRulesHint"}}</div>
-
-          <div class="field" style="margin-top:10px;">
-            <label>{{.T "cdnjs.defaultTTLLabel"}} <span class="key">defaultTTLSeconds</span></label>
-            <input type="text" name="defaultTTLSeconds" value="{{.DefaultTTLValue}}" placeholder="86400" />
-            <div class="hint">{{.T "cdnjs.defaultTTLHint"}}</div>
-          </div>
-
-          <div class="field">
-            <label>{{.T "common.preview"}} {{.T "common.previewNoRequest"}}</label>
-            <div class="hint">{{.T "cdnjs.previewHint"}}</div>
-            <div class="grid cols-2">
-              <input type="text" id="cdnjsPreviewPath" value="pic@main/README.md" placeholder="repo@ref/path/file.ext" />
-              <input type="text" id="cdnjsPreviewUrl" value="" class="readonly" readonly />
+      <section class="panel" role="tabpanel" data-hz-panel="ttl" id="cdnjs-ttl" hidden>
+        <div class="card">
+          <div class="card-head"><div class="card-sub">{{.T "cdnjs.ttlDefaultRulesHint"}}</div></div>
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="c-defttl">{{.T "cdnjs.defaultTTLLabel"}} <span class="key">defaultTTLSeconds</span></label>
+              <input id="c-defttl" type="text" inputmode="numeric" name="defaultTTLSeconds" value="{{.DefaultTTLValue}}" placeholder="86400" />
+              <div class="hint">{{.T "cdnjs.defaultTTLHint"}}</div>
             </div>
-            <div class="hint" id="cdnjsPreviewHint"></div>
-          </div>
-
-          <div class="field">
-            <label>{{.T "cdnjs.ttlOverridesLabel"}} <span class="key">ext=seconds（一行一个）</span></label>
-            <textarea name="ttlOverrides" placeholder="mjs=2592000&#10;wasm=2592000&#10;webm=604800">{{.TTLOverridesValue}}</textarea>
-            <div class="hint">{{.T "cdnjs.ttlOverridesHintPrefix"}} <code>#</code> {{.T "cdnjs.ttlOverridesHintSuffix"}} <code>{"mjs":2592000}</code>{{.T "common.period"}}</div>
+            <div class="field full">
+              <label class="label" for="c-ttlo">{{.T "cdnjs.ttlOverridesLabel"}} <span class="key">ext=seconds</span></label>
+              <textarea id="c-ttlo" name="ttlOverrides" spellcheck="false" placeholder="mjs=2592000&#10;wasm=2592000&#10;webm=604800">{{.TTLOverridesValue}}</textarea>
+              <div class="hint">{{.T "cdnjs.ttlOverridesHintPrefix"}} <code>#</code> {{.T "cdnjs.ttlOverridesHintSuffix"}} <code>{"mjs":2592000}</code>{{.T "common.period"}}</div>
+            </div>
           </div>
         </div>
-      </details>
+        <div class="card">
+          <div class="card-head">
+            <div class="card-head-text">
+              <div class="card-title"><svg class="icon"><use href="#i-eye"/></svg>{{.T "common.preview"}} <span class="muted small">{{.T "common.previewNoRequest"}}</span></div>
+              <div class="card-sub">{{.T "cdnjs.previewHint"}}</div>
+            </div>
+          </div>
+          <div class="pair">
+            <input type="text" id="cdnjsPreviewPath" value="pic@main/README.md" placeholder="repo@ref/path/file.ext" aria-label="path" />
+            <svg class="icon pair-arrow"><use href="#i-arrow-right"/></svg>
+            <input type="text" id="cdnjsPreviewUrl" value="" readonly aria-label="url" />
+          </div>
+          <div class="hint form-note" id="cdnjsPreviewHint"></div>
+        </div>
+      </section>
 
-      <div class="card hz-anchor" id="cdnjs-save">
-        <h3>{{.T "common.save"}}</h3>
-        <div class="field">
-          <label>{{.T "common.noteOptional"}}</label>
-          <input type="text" name="note" value="" placeholder="{{.T "cdnjs.notePlaceholder"}}" />
-        </div>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
-        </div>
-      </div>
+      {{template "savebar" (dict "Root" $ "Note" true)}}
     </form>
   </div>
 {{end}}

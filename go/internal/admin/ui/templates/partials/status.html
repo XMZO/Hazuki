@@ -4,6 +4,29 @@
   {{else if eq .Status.Status "error"}}
     <span class="pill err">{{.Root.T "status.error"}}</span>
   {{else}}
-    <span class="pill">{{.Root.T "status.disabled"}}</span>
+    <span class="pill off">{{.Root.T "status.disabled"}}</span>
   {{end}}
+{{end}}
+
+{{define "redisStatusPill"}}
+  {{if eq .Status.Status "ok"}}
+    <span class="pill ok">{{.Root.T "redis.ok"}} · {{.Status.LatencyMS}}ms</span>
+  {{else if eq .Status.Status "error"}}
+    <span class="pill err">{{.Root.T "redis.error"}}</span>
+  {{else}}
+    <span class="pill off">{{.Root.T "redis.notConfigured"}}</span>
+  {{end}}
+{{end}}
+
+{{define "savebar"}}
+  <div class="savebar">
+    <div class="savebar-status" aria-live="polite">
+      <span class="savebar-dot" aria-hidden="true"></span>
+      <span class="text when-clean">{{.Root.T "layout.subAuthed"}}</span>
+      <span class="text when-dirty">{{.Root.T "ui.unsaved"}}</span>
+    </div>
+    {{if .Note}}<input class="savebar-note" type="text" name="note" value="" placeholder="{{.Root.T "common.noteOptional"}}" aria-label="{{.Root.T "common.noteOptional"}}" />{{end}}
+    {{if .Back}}<a class="btn ghost" href="{{.Back}}">{{.BackLabel}}</a>{{end}}
+    <button class="btn primary" type="submit">{{if .Label}}{{.Label}}{{else}}{{.Root.T "common.save"}}{{end}}</button>
+  </div>
 {{end}}

@@ -20,6 +20,34 @@
     return out;
   };
 
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  const reducedMotion = () =>
+    !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  const currentPage = () => (document.body && document.body.getAttribute("data-page")) || "";
+
+  const iconEl = (name, cls = "") => {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", ("icon " + cls).trim());
+    svg.setAttribute("aria-hidden", "true");
+    const use = document.createElementNS(SVG_NS, "use");
+    use.setAttribute("href", "#i-" + name);
+    svg.appendChild(use);
+    return svg;
+  };
+
+  const restartAnimation = (el, cls) => {
+    if (!el || reducedMotion()) return;
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+    el.addEventListener("animationend", () => el.classList.remove(cls), { once: true });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Theme
+  // ---------------------------------------------------------------------------
   const THEME_KEY = "hazuki_theme";
 
   const normalizeTheme = (v) => {
@@ -36,6 +64,20 @@
     }
   };
 
+  const syncThemeColorMeta = (theme) => {
+    for (const meta of qsa("meta[data-hz-theme-color]")) {
+      const own = meta.getAttribute("data-hz-theme-color");
+      if (!meta.dataset.hzDefault) meta.dataset.hzDefault = meta.getAttribute("content") || "";
+      if (theme === "auto") {
+        meta.setAttribute("content", meta.dataset.hzDefault);
+        continue;
+      }
+      const other = qs(`meta[data-hz-theme-color="${theme}"]`);
+      const color = (other && (other.dataset.hzDefault || other.getAttribute("content"))) || "";
+      if (color && own) meta.setAttribute("content", color);
+    }
+  };
+
   const applyTheme = (theme) => {
     const t = normalizeTheme(theme);
     const root = document.documentElement;
@@ -45,6 +87,7 @@
     } else {
       root.removeAttribute("data-theme");
     }
+    syncThemeColorMeta(t);
   };
 
   const themeLabel = (theme) => {
@@ -55,14 +98,12 @@
   };
 
   const updateThemeToggle = () => {
-    const btn = qs("[data-theme-toggle]");
-    if (!btn) return;
-    const t = getTheme();
-    const label = themeLabel(t);
-    btn.textContent = label;
+    const label = themeLabel(getTheme());
     const title = tFmt("theme.toggleHint", "Theme: {mode} (click to toggle)", { mode: label });
-    btn.title = title;
-    btn.setAttribute("aria-label", title);
+    for (const btn of qsa("[data-theme-toggle]")) {
+      btn.title = title;
+      btn.setAttribute("aria-label", title);
+    }
   };
 
   const setTheme = (theme) => {
@@ -73,7 +114,20 @@
     } catch {
       // ignore
     }
-    applyTheme(t);
+
+    const html = document.documentElement;
+    if (typeof document.startViewTransition === "function" && !reducedMotion()) {
+      html.classList.add("hz-vt-theme");
+      try {
+        const vt = document.startViewTransition(() => applyTheme(t));
+        vt.finished.finally(() => html.classList.remove("hz-vt-theme"));
+      } catch {
+        html.classList.remove("hz-vt-theme");
+        applyTheme(t);
+      }
+    } else {
+      applyTheme(t);
+    }
     updateThemeToggle();
   };
 
@@ -91,35 +145,13 @@
     setTheme(nextTheme(getTheme()));
   };
 
+  // ---------------------------------------------------------------------------
+  // Formatting helpers
+  // ---------------------------------------------------------------------------
   const canPjax = () =>
     typeof window.fetch === "function" &&
     typeof window.DOMParser === "function" &&
     !!(window.history && window.history.pushState);
-
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
-
-  const waitTransitionEnd = async (el, maxMs) => {
-    if (!el) return;
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      return;
-    }
-    await Promise.race([
-      new Promise((resolve) => {
-        const onEnd = (evt) => {
-          if (evt.target !== el) return;
-          cleanup();
-        };
-        const cleanup = () => {
-          el.removeEventListener("transitionend", onEnd);
-          resolve();
-        };
-        el.addEventListener("transitionend", onEnd);
-        setTimeout(cleanup, maxMs);
-      }),
-      sleep(maxMs),
-    ]);
-  };
 
   const toInt = (v) => {
     const n = Number(v);
@@ -147,11 +179,37 @@
     return formatBytes(n) + "/s";
   };
 
+  const formatCount = (v) => {
+    const n = toInt(v);
+    try {
+      return n.toLocaleString();
+    } catch {
+      return String(n);
+    }
+  };
+
+  const abortQuietly = (ctrl) => {
+    if (ctrl && typeof ctrl.abort === "function") {
+      try {
+        ctrl.abort();
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Dashboard live stats
+  // ---------------------------------------------------------------------------
+  const SPARK_POINTS = 40;
+
   let dashTimer = null;
-  let dashPrevAgg = null;
+  let dashPrev = null;
   let dashPrevAt = 0;
   let dashAbort = null;
   let dashSeq = 0;
+  let sparkOut = [];
+  let sparkIn = [];
 
   let trafficTimer = null;
   let trafficAbort = null;
@@ -166,16 +224,11 @@
       clearInterval(dashTimer);
       dashTimer = null;
     }
-    dashPrevAgg = null;
+    dashPrev = null;
     dashPrevAt = 0;
-
-    if (dashAbort && typeof dashAbort.abort === "function") {
-      try {
-        dashAbort.abort();
-      } catch {
-        // ignore
-      }
-    }
+    sparkOut = [];
+    sparkIn = [];
+    abortQuietly(dashAbort);
     dashAbort = null;
   };
 
@@ -211,67 +264,96 @@
 
     const total = sumSnaps(sumSnaps(sumSnaps(sumSnaps(torcherino, cdnjs), git), sakuya), patchouli);
 
-    return {
-      torcherino,
-      cdnjs,
-      git,
-      sakuya,
-      patchouli,
-      total,
-    };
+    return { torcherino, cdnjs, git, sakuya, patchouli, total };
   };
 
-  const updateTrafficDom = (agg, prev, dt) => {
-    const card = qs("#hz-traffic-card") || qs("#dashboard-traffic");
-    if (!card) return;
+  // Keys are either canonical aggregates (torcherino, git, total, ...) or
+  // "raw:<metrics key>" for a single entry of the stats map (e.g. raw:git:mirror).
+  const lookupSnap = (state, key) => {
+    if (!state) return null;
+    if (key.startsWith("raw:")) {
+      const raw = state.raw && state.raw[key.slice(4)];
+      return raw ? snapFrom(raw) : { bytesIn: 0, bytesOut: 0, requests: 0 };
+    }
+    return state.agg[key] || null;
+  };
 
-    for (const row of qsa("tr[data-hz-svc]", card)) {
-      const key = (row.getAttribute("data-hz-svc") || "").trim();
-      const cur = (agg && agg[key]) || { bytesIn: 0, bytesOut: 0, requests: 0 };
-      const pre = prev && prev[key];
-
-      const downTotal = formatBytes(cur.bytesOut);
-      const upTotal = formatBytes(cur.bytesIn);
+  const updateTrafficDom = (state, prev, dt) => {
+    for (const box of qsa("[data-hz-svc]")) {
+      const key = (box.getAttribute("data-hz-svc") || "").trim();
+      if (!key) continue;
+      const cur = lookupSnap(state, key) || { bytesIn: 0, bytesOut: 0, requests: 0 };
+      const pre = lookupSnap(prev, key);
 
       let downRate = "-";
       let upRate = "-";
       if (pre && dt > 0) {
-        const dOut = Math.max(0, toInt(cur.bytesOut) - toInt(pre.bytesOut));
-        const dIn = Math.max(0, toInt(cur.bytesIn) - toInt(pre.bytesIn));
-        downRate = formatBps(dOut / dt);
-        upRate = formatBps(dIn / dt);
+        downRate = formatBps(Math.max(0, cur.bytesOut - pre.bytesOut) / dt);
+        upRate = formatBps(Math.max(0, cur.bytesIn - pre.bytesIn) / dt);
       }
 
-      for (const el of qsa("[data-hz-field]", row)) {
+      for (const el of qsa("[data-hz-field]", box)) {
         const f = (el.getAttribute("data-hz-field") || "").trim();
-        if (!f) continue;
-        if (f === "downTotal") el.textContent = downTotal;
-        else if (f === "upTotal") el.textContent = upTotal;
-        else if (f === "downRate") el.textContent = downRate;
-        else if (f === "upRate") el.textContent = upRate;
+        let text = null;
+        if (f === "downTotal") text = formatBytes(cur.bytesOut);
+        else if (f === "upTotal") text = formatBytes(cur.bytesIn);
+        else if (f === "downRate") text = downRate;
+        else if (f === "upRate") text = upRate;
+        if (text !== null && el.textContent !== text) el.textContent = text;
       }
     }
   };
 
-  const updateRedisDom = (redis) => {
-    const card = qs("#hz-redis-card") || qs("#dashboard-redis");
-    if (!card) return;
+  const renderSpark = (svg, values) => {
+    const line = qs(".spark-line", svg);
+    const area = qs(".spark-area", svg);
+    if (!line || !area) return;
+    if (values.length < 2) {
+      // Baseline placeholder until two samples exist.
+      line.setAttribute("d", "M0 24L100 24");
+      area.setAttribute("d", "");
+      return;
+    }
+    const max = Math.max(1, ...values);
+    // Right-aligned window that starts at 12 samples and widens up to SPARK_POINTS.
+    const windowSize = Math.max(12, values.length);
+    const span = windowSize - 1;
+    const offset = windowSize - values.length;
+    let d = "";
+    for (let i = 0; i < values.length; i += 1) {
+      const x = ((offset + i) / span) * 100;
+      const y = 24 - (Math.max(0, values[i]) / max) * 22;
+      d += (i === 0 ? "M" : "L") + x.toFixed(2) + " " + y.toFixed(2);
+    }
+    const x0 = ((offset / span) * 100).toFixed(2);
+    line.setAttribute("d", d);
+    area.setAttribute("d", d + "L100 26L" + x0 + " 26Z");
+  };
 
-    const pill = qs("#hz-redis-pill", card);
+  const updateSparks = () => {
+    for (const svg of qsa("[data-hz-spark]")) {
+      const kind = svg.getAttribute("data-hz-spark");
+      renderSpark(svg, kind === "in" ? sparkIn : sparkOut);
+    }
+  };
+
+  const updateRedisDom = (redis) => {
+    const pill = qs("#hz-redis-pill");
     if (pill) {
-      pill.classList.remove("ok", "err");
+      pill.classList.remove("ok", "err", "off");
       const status = (redis && redis.status ? String(redis.status) : "").toLowerCase();
 
       if (status === "ok") {
         pill.classList.add("ok");
         const latency = toInt(redis.latencyMS);
-        const addr = (redis.addr || "").toString();
-        pill.textContent = tKey("redis.ok", "Redis OK") + " · " + latency + "ms" + (addr ? " · " + addr : "");
+        pill.textContent = tKey("redis.ok", "Redis OK") + " · " + latency + "ms";
+        pill.title = (redis.addr || "").toString();
       } else if (status === "error") {
         pill.classList.add("err");
-        const addr = (redis.addr || "").toString();
-        pill.textContent = tKey("redis.error", "Redis error") + (addr ? " · " + addr : "");
+        pill.textContent = tKey("redis.error", "Redis error");
+        pill.title = (redis.addr || "").toString();
       } else {
+        pill.classList.add("off");
         pill.textContent = tKey("redis.notConfigured", "Redis not configured");
       }
     }
@@ -281,85 +363,75 @@
     const total = hits + misses;
     const hitRate = total > 0 ? ((hits / total) * 100).toFixed(1) + "%" : "-";
 
-    for (const el of qsa("[data-hz-redis-field]", card)) {
+    for (const el of qsa("[data-hz-redis-field]")) {
       const f = (el.getAttribute("data-hz-redis-field") || "").trim();
-      if (!f) continue;
-
-      if (f === "dbSize") el.textContent = String(toInt(redis && redis.dbSize));
-      else if (f === "usedMemoryHuman") el.textContent = (redis && redis.usedMemoryHuman ? String(redis.usedMemoryHuman) : "-");
-      else if (f === "keyspaceHits") el.textContent = String(hits);
-      else if (f === "keyspaceMisses") el.textContent = String(misses);
-      else if (f === "hitRate") el.textContent = hitRate;
+      let text = null;
+      if (f === "dbSize") text = redis ? formatCount(redis.dbSize) : "-";
+      else if (f === "usedMemoryHuman") text = redis && redis.usedMemoryHuman ? String(redis.usedMemoryHuman) : "-";
+      else if (f === "keyspaceHits") text = formatCount(hits);
+      else if (f === "keyspaceMisses") text = formatCount(misses);
+      else if (f === "hitRate") text = hitRate;
+      if (text !== null && el.textContent !== text) el.textContent = text;
     }
   };
 
   const pollDashboardStats = async () => {
-    const page = (document.body && document.body.getAttribute("data-page")) || "";
-    if (page !== "dashboard") {
+    if (currentPage() !== "dashboard") {
       stopDashboardStats();
       return;
     }
+    if (document.hidden) return;
 
     const mySeq = (dashSeq += 1);
-    if (dashAbort && typeof dashAbort.abort === "function") {
-      try {
-        dashAbort.abort();
-      } catch {
-        // ignore
-      }
-    }
-
-    let signal = null;
-    if (typeof AbortController === "function") {
-      dashAbort = new AbortController();
-      signal = dashAbort.signal;
-    } else {
-      dashAbort = null;
-    }
+    abortQuietly(dashAbort);
+    dashAbort = typeof AbortController === "function" ? new AbortController() : null;
 
     try {
       const opts = { method: "GET", headers: { Accept: "application/json" }, credentials: "same-origin" };
-      if (signal) opts.signal = signal;
+      if (dashAbort) opts.signal = dashAbort.signal;
 
       const resp = await fetch("/_hazuki/stats", opts);
       if (mySeq !== dashSeq) return;
 
       const ct = (resp.headers.get("content-type") || "").toLowerCase();
-      if (!resp.ok || !ct.includes("application/json")) {
-        return;
-      }
+      if (!resp.ok || !ct.includes("application/json")) return;
 
       const payload = await resp.json();
       if (mySeq !== dashSeq) return;
 
-      const nowAt = performance && typeof performance.now === "function" ? performance.now() : Date.now();
+      const nowAt = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
       const dt = dashPrevAt > 0 ? Math.max(0.001, (nowAt - dashPrevAt) / 1000) : 0;
 
-      const services = payload && payload.services ? payload.services : {};
-      const canon = aggregateServices(services);
+      const raw = payload && payload.services && typeof payload.services === "object" ? payload.services : {};
+      const state = { agg: aggregateServices(raw), raw };
 
-      updateTrafficDom(canon, dashPrevAgg, dt);
-
+      updateTrafficDom(state, dashPrev, dt);
       updateRedisDom(payload && payload.redis ? payload.redis : null);
 
-      dashPrevAgg = canon;
+      if (dashPrev && dt > 0) {
+        const total = state.agg.total;
+        const prevTotal = dashPrev.agg.total;
+        sparkOut.push(Math.max(0, total.bytesOut - prevTotal.bytesOut) / dt);
+        sparkIn.push(Math.max(0, total.bytesIn - prevTotal.bytesIn) / dt);
+        if (sparkOut.length > SPARK_POINTS) sparkOut = sparkOut.slice(-SPARK_POINTS);
+        if (sparkIn.length > SPARK_POINTS) sparkIn = sparkIn.slice(-SPARK_POINTS);
+        updateSparks();
+      }
+
+      dashPrev = state;
       dashPrevAt = nowAt;
     } catch {
-      if (dashAbort && dashAbort.signal && dashAbort.signal.aborted) {
-        return;
-      }
+      // network hiccup or abort: keep the previous frame
     }
   };
 
   const ensureDashboardStats = () => {
-    const page = (document.body && document.body.getAttribute("data-page")) || "";
-    if (page !== "dashboard") {
+    if (currentPage() !== "dashboard") {
       stopDashboardStats();
       return;
     }
-
     if (dashTimer) return;
-    dashPrevAgg = null;
+    dashPrev = null;
     dashPrevAt = 0;
     pollDashboardStats();
     dashTimer = setInterval(pollDashboardStats, 2000);
@@ -370,14 +442,13 @@
       clearInterval(trafficTimer);
       trafficTimer = null;
     }
-    if (trafficAbort && typeof trafficAbort.abort === "function") {
-      try {
-        trafficAbort.abort();
-      } catch {
-        // ignore
-      }
-    }
+    abortQuietly(trafficAbort);
     trafficAbort = null;
+    trafficLast = null;
+    if (trafficResizeObserver) {
+      trafficResizeObserver.disconnect();
+      trafficResizeObserver = null;
+    }
   };
 
   const stopSystemPage = () => {
@@ -385,16 +456,13 @@
       clearInterval(systemTimer);
       systemTimer = null;
     }
-    if (systemAbort && typeof systemAbort.abort === "function") {
-      try {
-        systemAbort.abort();
-      } catch {
-        // ignore
-      }
-    }
+    abortQuietly(systemAbort);
     systemAbort = null;
   };
 
+  // ---------------------------------------------------------------------------
+  // System: rewrite runtime
+  // ---------------------------------------------------------------------------
   const getObjectPath = (obj, path) => {
     const parts = (path || "").toString().split(".");
     let cur = obj;
@@ -416,7 +484,13 @@
     }
     for (const panel of qsa("[data-hz-rewrite-panel]")) {
       const key = (panel.getAttribute("data-hz-rewrite-panel") || "").trim();
-      panel.hidden = key !== activeTab;
+      const show = key === activeTab;
+      if (show && panel.hidden) {
+        panel.hidden = false;
+        restartAnimation(panel, "panel-enter");
+      } else if (!show) {
+        panel.hidden = true;
+      }
     }
   };
 
@@ -436,7 +510,11 @@
       const path = (el.getAttribute("data-hz-rewrite-field") || "").trim();
       if (!path) continue;
       const value = getObjectPath(info, path);
-      el.textContent = typeof value === "string" && value.trim() !== "" ? value : "-";
+      const text = typeof value === "string" && value.trim() !== "" ? value : "-";
+      if (el.textContent !== text) {
+        el.textContent = text;
+        el.title = text;
+      }
     }
 
     for (const pill of qsa("[data-hz-rewrite-enabled-pill]", card)) {
@@ -444,63 +522,45 @@
       if (!key) continue;
       const enabled = !!getObjectPath(info, key + ".enabled");
       pill.classList.toggle("ok", enabled);
-      pill.classList.toggle("err", !enabled);
+      pill.classList.toggle("off", !enabled);
       pill.textContent = enabled
-        ? tKey("common.enabled", "Enabled")
-        : tKey("common.disabled", "Disabled");
+        ? pill.getAttribute("data-label-on") || tKey("common.enabled", "Enabled")
+        : pill.getAttribute("data-label-off") || tKey("common.disabled", "Disabled");
     }
   };
 
   const pollSystemRewriteRuntime = async () => {
-    const page = (document.body && document.body.getAttribute("data-page")) || "";
-    if (page !== "system") {
+    if (currentPage() !== "system") {
       stopSystemPage();
       return;
     }
+    if (document.hidden) return;
 
     const mySeq = (systemSeq += 1);
-    if (systemAbort && typeof systemAbort.abort === "function") {
-      try {
-        systemAbort.abort();
-      } catch {
-        // ignore
-      }
-    }
-
-    let signal = null;
-    if (typeof AbortController === "function") {
-      systemAbort = new AbortController();
-      signal = systemAbort.signal;
-    } else {
-      systemAbort = null;
-    }
+    abortQuietly(systemAbort);
+    systemAbort = typeof AbortController === "function" ? new AbortController() : null;
 
     try {
       const opts = { method: "GET", headers: { Accept: "application/json" }, credentials: "same-origin" };
-      if (signal) opts.signal = signal;
+      if (systemAbort) opts.signal = systemAbort.signal;
 
       const resp = await fetch("/_hazuki/system/rewrite-runtime", opts);
       if (mySeq !== systemSeq) return;
 
       const ct = (resp.headers.get("content-type") || "").toLowerCase();
-      if (!resp.ok || !ct.includes("application/json")) {
-        return;
-      }
+      if (!resp.ok || !ct.includes("application/json")) return;
 
       const payload = await resp.json();
       if (mySeq !== systemSeq) return;
 
       updateSystemRewriteRuntimeDom(payload && payload.rewriteRuntime ? payload.rewriteRuntime : null);
     } catch {
-      if (systemAbort && systemAbort.signal && systemAbort.signal.aborted) {
-        return;
-      }
+      // keep previous values
     }
   };
 
   const ensureSystemPage = () => {
-    const page = (document.body && document.body.getAttribute("data-page")) || "";
-    if (page !== "system") {
+    if (currentPage() !== "system") {
       stopSystemPage();
       return;
     }
@@ -525,6 +585,9 @@
     systemTimer = setInterval(pollSystemRewriteRuntime, 5000);
   };
 
+  // ---------------------------------------------------------------------------
+  // Time formatting
+  // ---------------------------------------------------------------------------
   const pad2 = (n) => String(n).padStart(2, "0");
 
   const getTimeZoneSpec = () => ((window && window.HazukiTimeZone) || "").toString().trim();
@@ -559,7 +622,7 @@
     const offsetMinutes = sign * (hh * 60 + mm);
     if (offsetMinutes < -14 * 60 || offsetMinutes > 14 * 60) return { mode: "auto", offsetMinutes: 0, label: "auto" };
 
-    const label = (offsetMinutes === 0 ? "UTC" : `${sign === 1 ? "+" : "-"}${pad2(hh)}:${pad2(mm)}`);
+    const label = offsetMinutes === 0 ? "UTC" : `${sign === 1 ? "+" : "-"}${pad2(hh)}:${pad2(mm)}`;
     return { mode: "offset", offsetMinutes, label };
   };
 
@@ -607,6 +670,18 @@
     return `${parts.y}-${parts.m}-${parts.day} ${parts.h}:${parts.min}`;
   };
 
+  // Compact axis label: drop the parts every tick shares.
+  const formatAxisTime = (kind, ts) => {
+    const n = Number(ts);
+    if (!Number.isFinite(n) || n <= 0) return "";
+    const parts = datePartsFromMs(n * 1000);
+    if (!parts) return "";
+    if (kind === "year") return String(parts.y);
+    if (kind === "month") return `${parts.y}-${parts.m}`;
+    if (kind === "day") return `${parts.m}-${parts.day}`;
+    return `${parts.m}-${parts.day} ${parts.h}:00`;
+  };
+
   const normalizeIsoForDate = (iso) => {
     let s = (iso || "").toString().trim();
     if (!s) return "";
@@ -643,8 +718,16 @@
       const ms = parseIsoToMs(iso);
       if (!Number.isFinite(ms) || ms <= 0) continue;
       el.textContent = formatInstantMs(ms);
+      if (el.tagName === "TIME") el.setAttribute("datetime", iso);
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // Traffic chart (rendered at device pixels so text and strokes stay crisp)
+  // ---------------------------------------------------------------------------
+  let trafficLast = null;
+  let trafficResizeObserver = null;
+  let trafficGeom = null;
 
   const setTrafficKindActive = (kind) => {
     const root = qs("[data-hz-traffic-kind]");
@@ -669,160 +752,258 @@
     return (sel.value || "").trim() || "total";
   };
 
-  const buildLinePath = ({ values, width, height, pad, max }) => {
-    const n = values.length;
-    if (n === 0) return "";
-    const innerW = Math.max(1, width - pad * 2);
-    const innerH = Math.max(1, height - pad * 2);
-    const denom = Math.max(1, max);
-
-    // When there's only one bucket, draw a flat line so it's still visible.
-    if (n === 1) {
-      const v = Math.max(0, Number(values[0]) || 0);
-      const y = pad + (1 - Math.min(1, v / denom)) * innerH;
-      const x0 = pad;
-      const x1 = pad + innerW;
-      return `M${x0.toFixed(2)} ${y.toFixed(2)} L${x1.toFixed(2)} ${y.toFixed(2)}`;
+  // Nice 1/2/2.5/5 x 10^k steps in the byte unit that fits the max (1024-based).
+  const niceByteTicks = (rawMax, count) => {
+    const max = Math.max(1, rawMax);
+    let unit = 1;
+    while (max / unit >= 1024 && unit < 1024 ** 4) unit *= 1024;
+    const scaled = max / unit;
+    const rough = scaled / count;
+    const pow = 10 ** Math.floor(Math.log10(rough));
+    const steps = [1, 2, 2.5, 5, 10];
+    let step = steps[steps.length - 1] * pow;
+    for (const s of steps) {
+      if (s * pow >= rough) {
+        step = s * pow;
+        break;
+      }
     }
-
-    const step = innerW / (n - 1);
-
-    let d = "";
-    for (let i = 0; i < n; i += 1) {
-      const x = pad + step * i;
-      const v = Math.max(0, Number(values[i]) || 0);
-      const y = pad + (1 - Math.min(1, v / denom)) * innerH;
-      d += (i === 0 ? "M" : "L") + x.toFixed(2) + " " + y.toFixed(2) + " ";
-    }
-    return d.trim();
+    const top = Math.ceil(scaled / step) * step;
+    const ticks = [];
+    for (let v = 0; v <= top + step / 2; v += step) ticks.push(v * unit);
+    return { max: top * unit, ticks };
   };
 
-  const buildGridPath = ({ width, height, pad }) => {
-    const innerW = Math.max(1, width - pad * 2);
-    const innerH = Math.max(1, height - pad * 2);
-
-    let d = "";
-    for (let i = 1; i <= 3; i += 1) {
-      const y = pad + (innerH * i) / 4;
-      d += "M" + pad + " " + y.toFixed(2) + " L" + (pad + innerW) + " " + y.toFixed(2) + " ";
-    }
-    for (let i = 1; i <= 3; i += 1) {
-      const x = pad + (innerW * i) / 4;
-      d += "M" + x.toFixed(2) + " " + pad + " L" + x.toFixed(2) + " " + (pad + innerH) + " ";
-    }
-    return d.trim();
+  const svgEl = (name, attrs) => {
+    const el = document.createElementNS(SVG_NS, name);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, String(v));
+    return el;
   };
 
-  const renderTrafficSeries = (payload) => {
-    const kind = (payload && payload.kind ? payload.kind : "").toString();
-    const pts = Array.isArray(payload && payload.points) ? payload.points : [];
+  const drawTrafficChart = () => {
+    const box = qs("#hzTrafficChart");
+    const svg = qs("#hzTrafficSvg");
+    if (!box || !svg || !trafficLast) return;
 
-    const outEl = qs("#hzTrafficOut");
-    const inEl = qs("#hzTrafficIn");
-    const gridEl = qs("#hzTrafficGrid");
-    const outLastEl = qs("#hzTrafficOutLast");
-    const inLastEl = qs("#hzTrafficInLast");
-    const rangeEl = qs("#hzTrafficRange");
-    const tbody = qs("#hzTrafficTableBody");
+    const W = Math.max(240, Math.round(box.clientWidth));
+    const H = Math.max(160, Math.round(box.clientHeight));
+    const pts = Array.isArray(trafficLast.points) ? trafficLast.points : [];
+    const kind = (trafficLast.kind || "").toString();
 
-    if (!(outEl instanceof SVGPathElement) || !(inEl instanceof SVGPathElement) || !(gridEl instanceof SVGPathElement)) {
+    const outs = pts.map((p) => Math.max(0, toInt(p && p.bytesOut)));
+    const ins = pts.map((p) => Math.max(0, toInt(p && p.bytesIn)));
+    // Floor the scale at 1 KB so an idle series doesn't produce sub-byte ticks.
+    const { max, ticks } = niceByteTicks(Math.max(1024, ...outs, ...ins), 4);
+
+    const padL = 62;
+    const padR = 10;
+    const padT = 10;
+    const padB = 24;
+    const iw = Math.max(1, W - padL - padR);
+    const ih = Math.max(1, H - padT - padB);
+    const n = pts.length;
+    const xAt = (i) => (n <= 1 ? padL + iw / 2 : padL + (i * iw) / (n - 1));
+    const yAt = (v) => padT + ih - (v / max) * ih;
+
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.replaceChildren();
+
+    for (const t of ticks) {
+      const y = Math.round(yAt(t)) + 0.5;
+      svg.appendChild(svgEl("line", { class: t === 0 ? "chart-base" : "chart-grid", x1: padL, x2: W - padR, y1: y, y2: y }));
+      const label = svgEl("text", { class: "chart-tick", x: padL - 8, y: y + 4, "text-anchor": "end" });
+      label.textContent = t === 0 ? "0" : formatBytes(t);
+      svg.appendChild(label);
+    }
+
+    if (!n) {
+      const empty = svgEl("text", { class: "chart-empty", x: padL + iw / 2, y: padT + ih / 2, "text-anchor": "middle" });
+      empty.textContent = tKey("traffic.empty", "No data yet");
+      svg.appendChild(empty);
+      trafficGeom = null;
       return;
     }
 
-    const bytesOut = pts.map((p) => toInt(p && p.bytesOut));
-    const bytesIn = pts.map((p) => toInt(p && p.bytesIn));
-    const reqs = pts.map((p) => toInt(p && p.requests));
-
-    const max = Math.max(1, ...bytesOut, ...bytesIn);
-
-    const width = 1000;
-    const height = 260;
-    const pad = 18;
-
-    gridEl.setAttribute("d", buildGridPath({ width, height, pad }));
-    outEl.setAttribute("d", buildLinePath({ values: bytesOut, width, height, pad, max }));
-    inEl.setAttribute("d", buildLinePath({ values: bytesIn, width, height, pad, max }));
-
-    const last = pts.length ? pts[pts.length - 1] : null;
-    if (outLastEl) outLastEl.textContent = formatBytes(toInt(last && last.bytesOut));
-    if (inLastEl) inLastEl.textContent = formatBytes(toInt(last && last.bytesIn));
-
-    if (rangeEl) {
-      const fromTs = payload && payload.fromTs ? payload.fromTs : 0;
-      const toTs = payload && payload.toTs ? payload.toTs : 0;
-      rangeEl.textContent =
-        formatBucketTime(kind, fromTs) +
-        " → " +
-        formatBucketTime(kind, toTs) +
-        " · " +
-        tKey("dashboard.traffic.total", "Total") +
-        ": " +
-        formatBytes(max);
+    const labelIdx = n === 1 ? [0] : n === 2 ? [0, 1] : [0, Math.floor((n - 1) / 2), n - 1];
+    for (const i of labelIdx) {
+      const anchor = n === 1 ? "middle" : i === 0 ? "start" : i === n - 1 ? "end" : "middle";
+      const label = svgEl("text", { class: "chart-tick", x: xAt(i), y: H - 6, "text-anchor": anchor });
+      label.textContent = formatAxisTime(kind, pts[i] && pts[i].startTs);
+      svg.appendChild(label);
     }
 
+    const linePath = (vals) => {
+      if (vals.length === 1) {
+        const y = yAt(vals[0]).toFixed(1);
+        return `M${padL} ${y}L${padL + iw} ${y}`;
+      }
+      let d = "";
+      for (let i = 0; i < vals.length; i += 1) {
+        d += (i === 0 ? "M" : "L") + xAt(i).toFixed(1) + " " + yAt(vals[i]).toFixed(1);
+      }
+      return d;
+    };
+    const areaPath = (vals) => {
+      const line = linePath(vals);
+      const x0 = vals.length === 1 ? padL : xAt(0);
+      const x1 = vals.length === 1 ? padL + iw : xAt(vals.length - 1);
+      return `${line}L${x1.toFixed(1)} ${padT + ih}L${x0.toFixed(1)} ${padT + ih}Z`;
+    };
+
+    svg.appendChild(svgEl("path", { class: "chart-area s2", d: areaPath(ins) }));
+    svg.appendChild(svgEl("path", { class: "chart-area s1", d: areaPath(outs) }));
+    svg.appendChild(svgEl("path", { class: "chart-line s2", d: linePath(ins) }));
+    svg.appendChild(svgEl("path", { class: "chart-line s1", d: linePath(outs) }));
+
+    const hover = svgEl("g", { class: "chart-hover" });
+    const cross = svgEl("line", { class: "chart-cross", x1: 0, x2: 0, y1: padT, y2: padT + ih });
+    const dotOut = svgEl("circle", { class: "chart-dot s1", r: 4, cx: 0, cy: 0 });
+    const dotIn = svgEl("circle", { class: "chart-dot s2", r: 4, cx: 0, cy: 0 });
+    hover.append(cross, dotIn, dotOut);
+    svg.appendChild(hover);
+
+    trafficGeom = { W, padL, iw, n, xAt, yAt, outs, ins, pts, kind, cross, dotOut, dotIn };
+  };
+
+  const showTrafficTip = (clientX) => {
+    const box = qs("#hzTrafficChart");
+    const tip = qs("#hzTrafficTip");
+    const g = trafficGeom;
+    if (!box || !tip || !g || !g.n) return;
+
+    const rect = box.getBoundingClientRect();
+    const x = ((clientX - rect.left) / Math.max(1, rect.width)) * g.W;
+    let i = g.n <= 1 ? 0 : Math.round(((x - g.padL) / g.iw) * (g.n - 1));
+    i = Math.max(0, Math.min(g.n - 1, i));
+
+    const cx = g.n <= 1 ? g.padL + g.iw / 2 : g.xAt(i);
+    const px = Math.round(cx) + 0.5;
+    g.cross.setAttribute("x1", px);
+    g.cross.setAttribute("x2", px);
+    g.dotOut.setAttribute("cx", cx);
+    g.dotOut.setAttribute("cy", g.yAt(g.outs[i]));
+    g.dotIn.setAttribute("cx", cx);
+    g.dotIn.setAttribute("cy", g.yAt(g.ins[i]));
+
+    const p = g.pts[i] || {};
+    const rows = [
+      ["s1", tKey("traffic.out", "Out"), formatBytes(g.outs[i])],
+      ["s2", tKey("traffic.in", "In"), formatBytes(g.ins[i])],
+      ["", tKey("traffic.req", "Requests"), formatCount(p.requests)],
+    ];
+    const frag = document.createDocumentFragment();
+    const time = document.createElement("div");
+    time.className = "tip-time";
+    time.textContent = formatBucketTime(g.kind, p.startTs);
+    frag.appendChild(time);
+    for (const [cls, label, value] of rows) {
+      const row = document.createElement("div");
+      row.className = "tip-row";
+      const key = document.createElement("i");
+      key.className = "key-line " + cls;
+      if (!cls) key.style.visibility = "hidden";
+      const name = document.createElement("span");
+      name.textContent = label;
+      const val = document.createElement("b");
+      val.textContent = value;
+      row.append(key, name, val);
+      frag.appendChild(row);
+    }
+    tip.replaceChildren(frag);
+
+    const cssX = (cx / g.W) * rect.width;
+    const tipW = tip.offsetWidth || 180;
+    let left = cssX + 14;
+    if (left + tipW > rect.width) left = cssX - tipW - 14;
+    tip.style.setProperty("--tx", Math.max(0, left).toFixed(0) + "px");
+    box.classList.add("is-hover");
+  };
+
+  const hideTrafficTip = () => {
+    const box = qs("#hzTrafficChart");
+    if (box) box.classList.remove("is-hover");
+  };
+
+  const renderTrafficSeries = (payload) => {
+    trafficLast = payload || { points: [] };
+    const kind = (trafficLast.kind || "").toString();
+    const pts = Array.isArray(trafficLast.points) ? trafficLast.points : [];
+
+    drawTrafficChart();
+
+    let sumOut = 0;
+    let sumIn = 0;
+    for (const p of pts) {
+      sumOut += Math.max(0, toInt(p && p.bytesOut));
+      sumIn += Math.max(0, toInt(p && p.bytesIn));
+    }
+    const outLastEl = qs("#hzTrafficOutLast");
+    const inLastEl = qs("#hzTrafficInLast");
+    if (outLastEl) outLastEl.textContent = formatBytes(sumOut);
+    if (inLastEl) inLastEl.textContent = formatBytes(sumIn);
+
+    const rangeEl = qs("#hzTrafficRange");
+    if (rangeEl) {
+      const fromTs = trafficLast.fromTs || 0;
+      const toTs = trafficLast.toTs || 0;
+      rangeEl.textContent = formatBucketTime(kind, fromTs) + " → " + formatBucketTime(kind, toTs);
+    }
+
+    const tbody = qs("#hzTrafficTableBody");
     if (tbody) {
-      tbody.innerHTML = "";
+      const frag = document.createDocumentFragment();
       for (let i = pts.length - 1; i >= 0; i -= 1) {
         const p = pts[i] || {};
         const tr = document.createElement("tr");
-
-        const tdTime = document.createElement("td");
-        tdTime.textContent = formatBucketTime(kind, p.startTs);
-        tr.appendChild(tdTime);
-
-        const tdOut = document.createElement("td");
-        tdOut.innerHTML = "<code>" + formatBytes(toInt(p.bytesOut)) + "</code>";
-        tr.appendChild(tdOut);
-
-        const tdIn = document.createElement("td");
-        tdIn.innerHTML = "<code>" + formatBytes(toInt(p.bytesIn)) + "</code>";
-        tr.appendChild(tdIn);
-
-        const tdReq = document.createElement("td");
-        tdReq.innerHTML = "<code>" + String(toInt(p.requests)) + "</code>";
-        tr.appendChild(tdReq);
-
-        tbody.appendChild(tr);
+        const cells = [
+          [formatBucketTime(kind, p.startTs), ""],
+          [formatBytes(toInt(p.bytesOut)), "num"],
+          [formatBytes(toInt(p.bytesIn)), "num"],
+          [formatCount(p.requests), "num"],
+        ];
+        for (const [text, cls] of cells) {
+          const td = document.createElement("td");
+          if (cls) td.className = cls;
+          td.textContent = text;
+          tr.appendChild(td);
+        }
+        frag.appendChild(tr);
       }
-
       if (!pts.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
         td.colSpan = 4;
-        td.className = "muted small";
-        td.textContent = "-";
+        td.className = "empty";
+        td.textContent = tKey("traffic.empty", "No data yet");
         tr.appendChild(td);
-        tbody.appendChild(tr);
+        frag.appendChild(tr);
       }
+      tbody.replaceChildren(frag);
     }
   };
 
   const fetchTrafficSeries = async () => {
-    const page = (document.body && document.body.getAttribute("data-page")) || "";
-    if (page !== "traffic") return;
+    if (currentPage() !== "traffic") return;
+    if (document.hidden && trafficLast) return;
 
     const kind = getTrafficKind();
     const svc = getTrafficService();
-
     const mySeq = (trafficSeq += 1);
 
-    if (trafficAbort && typeof trafficAbort.abort === "function") {
-      try {
-        trafficAbort.abort();
-      } catch {
-        // ignore
-      }
-    }
+    abortQuietly(trafficAbort);
     trafficAbort = typeof AbortController === "function" ? new AbortController() : null;
 
     const url = new URL("/_hazuki/traffic/series", window.location.href);
     url.searchParams.set("kind", kind);
     url.searchParams.set("svc", svc);
 
+    const box = qs("#hzTrafficChart");
+    if (box) box.classList.add("is-loading");
     try {
       const resp = await fetch(url.toString(), {
         method: "GET",
         headers: { accept: "application/json" },
+        credentials: "same-origin",
         signal: trafficAbort ? trafficAbort.signal : undefined,
       });
       if (mySeq !== trafficSeq) return;
@@ -834,15 +1015,14 @@
 
       renderTrafficSeries(payload);
     } catch {
-      if (trafficAbort && trafficAbort.signal && trafficAbort.signal.aborted) {
-        return;
-      }
+      // keep the previous frame
+    } finally {
+      if (mySeq === trafficSeq && box) box.classList.remove("is-loading");
     }
   };
 
   const ensureTrafficPage = () => {
-    const page = (document.body && document.body.getAttribute("data-page")) || "";
-    if (page !== "traffic") {
+    if (currentPage() !== "traffic") {
       stopTrafficPage();
       return;
     }
@@ -875,6 +1055,25 @@
         e.preventDefault();
         fetchTrafficSeries();
       });
+    }
+
+    const box = qs("#hzTrafficChart");
+    if (box && !box.__hzTrafficBound) {
+      box.__hzTrafficBound = true;
+      box.addEventListener("pointermove", (e) => showTrafficTip(e.clientX));
+      box.addEventListener("pointerdown", (e) => showTrafficTip(e.clientX));
+      box.addEventListener("pointerleave", hideTrafficTip);
+      if (typeof ResizeObserver === "function") {
+        let raf = 0;
+        trafficResizeObserver = new ResizeObserver(() => {
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(() => {
+            hideTrafficTip();
+            drawTrafficChart();
+          });
+        });
+        trafficResizeObserver.observe(box);
+      }
     }
 
     if (!trafficTimer) {
@@ -1354,10 +1553,350 @@
     );
   };
 
-  const refreshPage = ({ skipNav = false, pathname = "" } = {}) => {
-    if (!skipNav) updateNavActive(pathname);
+  // ---------------------------------------------------------------------------
+  // Tabs: one strip per page ([data-hz-tabs]) switching [data-hz-panel] sections.
+  // Route tabs ([data-hz-route-tabs]) are plain links; only the ink is managed.
+  // ---------------------------------------------------------------------------
+  const TAB_STORE_KEY = "hazuki_tabs";
+  let tabsResizeObserver = null;
+
+  const readTabStore = () => {
+    try {
+      const v = JSON.parse(sessionStorage.getItem(TAB_STORE_KEY) || "{}");
+      return v && typeof v === "object" ? v : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const writeTabStore = (path, tab) => {
+    try {
+      const store = readTabStore();
+      store[path] = tab;
+      sessionStorage.setItem(TAB_STORE_KEY, JSON.stringify(store));
+    } catch {
+      // ignore (private mode, quota)
+    }
+  };
+
+  const tabStrip = () => qs("[data-hz-tabs]") || qs("[data-hz-route-tabs]");
+
+  const positionInk = (strip, animate) => {
+    if (!strip) return;
+    const ink = qs(".tab-ink", strip);
+    if (!ink) return;
+    const active = qs('.tab[aria-selected="true"], .tab[aria-current="page"]', strip);
+    if (!active || !active.offsetWidth) {
+      ink.style.opacity = "0";
+      return;
+    }
+    const inset = 8;
+    const x = active.offsetLeft + inset;
+    const w = Math.max(8, active.offsetWidth - inset * 2);
+    if (!animate) ink.classList.add("no-anim");
+    ink.style.transform = `translateX(${x}px) scaleX(${w})`;
+    ink.style.opacity = "1";
+    if (!animate) {
+      void ink.offsetWidth;
+      ink.classList.remove("no-anim");
+    }
+  };
+
+  const scrollTabIntoView = (strip, tab, animate) => {
+    if (!strip || !tab || strip.scrollWidth <= strip.clientWidth + 1) return;
+    const left = tab.offsetLeft - (strip.clientWidth - tab.offsetWidth) / 2;
+    try {
+      strip.scrollTo({ left: Math.max(0, left), behavior: animate && !reducedMotion() ? "smooth" : "auto" });
+    } catch {
+      strip.scrollLeft = Math.max(0, left);
+    }
+  };
+
+  const syncTabForms = () => {
+    for (const form of qsa("form[data-hz-tabform]")) {
+      form.classList.toggle("hz-form-idle", !qs("[data-hz-panel]:not([hidden])", form));
+    }
+  };
+
+  const activateTab = (name, { animate = true, store = true, focus = false } = {}) => {
+    const strip = qs("[data-hz-tabs]");
+    if (!strip || !name) return false;
+    const tabs = qsa("[data-hz-tab]", strip);
+    const target = tabs.find((t) => t.getAttribute("data-hz-tab") === name);
+    if (!target) return false;
+
+    for (const t of tabs) {
+      const on = t === target;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+    }
+    for (const panel of qsa("[data-hz-panel]")) {
+      const on = panel.getAttribute("data-hz-panel") === name;
+      if (on && panel.hidden) {
+        panel.hidden = false;
+        if (animate) restartAnimation(panel, "panel-enter");
+      } else if (!on && !panel.hidden) {
+        panel.hidden = true;
+      }
+    }
+    syncTabForms();
+    positionInk(strip, animate);
+    scrollTabIntoView(strip, target, animate);
+    if (store) writeTabStore(window.location.pathname, name);
+    if (focus) target.focus({ preventScroll: true });
+    return true;
+  };
+
+  const initTabs = () => {
+    if (tabsResizeObserver) {
+      tabsResizeObserver.disconnect();
+      tabsResizeObserver = null;
+    }
+    const strip = tabStrip();
+    if (!strip) return;
+
+    if (strip.hasAttribute("data-hz-tabs")) {
+      const has = (name) => !!name && qsa("[data-hz-tab]", strip).some((t) => t.getAttribute("data-hz-tab") === name);
+      let initial = "";
+      const hash = decodeURIComponent((window.location.hash || "").slice(1));
+      if (hash) {
+        const el = document.getElementById(hash);
+        const panel = el ? el.closest("[data-hz-panel]") : null;
+        if (panel) initial = panel.getAttribute("data-hz-panel") || "";
+        else if (has(hash)) initial = hash;
+      }
+      if (!initial) {
+        const stored = readTabStore()[window.location.pathname];
+        if (has(stored)) initial = stored;
+      }
+      if (!initial) {
+        const cur = qs('[data-hz-tab][aria-selected="true"]', strip) || qs("[data-hz-tab]", strip);
+        initial = cur ? cur.getAttribute("data-hz-tab") || "" : "";
+      }
+      activateTab(initial, { animate: false, store: false });
+    } else {
+      positionInk(strip, false);
+      scrollTabIntoView(strip, qs('[aria-current="page"]', strip), false);
+    }
+
+    if (typeof ResizeObserver === "function") {
+      tabsResizeObserver = new ResizeObserver(() => positionInk(strip, false));
+      tabsResizeObserver.observe(strip);
+    }
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => positionInk(strip, false)).catch(() => {});
+    }
+  };
+
+  const onTabClick = (e) => {
+    const tab = e.target instanceof Element ? e.target.closest("[data-hz-tab]") : null;
+    if (!tab || !tab.closest("[data-hz-tabs]")) return;
+    e.preventDefault();
+    activateTab(tab.getAttribute("data-hz-tab") || "");
+  };
+
+  const onTabKeydown = (e) => {
+    const tab = e.target instanceof Element ? e.target.closest("[data-hz-tab]") : null;
+    if (!tab) return;
+    const strip = tab.closest("[data-hz-tabs]");
+    if (!strip) return;
+    const tabs = qsa("[data-hz-tab]", strip);
+    const idx = tabs.indexOf(tab);
+    let next = -1;
+    if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    activateTab(tabs[next].getAttribute("data-hz-tab") || "", { focus: true });
+  };
+
+  // A required field inside a hidden tab can't show its validation bubble:
+  // switch to that tab first.
+  const onInvalid = (e) => {
+    const panel = e.target instanceof Element ? e.target.closest("[data-hz-panel]") : null;
+    if (panel && panel.hidden) activateTab(panel.getAttribute("data-hz-panel") || "", { animate: false });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Drawer (mobile navigation)
+  // ---------------------------------------------------------------------------
+  const desktopQuery = window.matchMedia ? window.matchMedia("(min-width: 1024px)") : null;
+
+  const setDrawer = (open) => {
+    const body = document.body;
+    if (!body) return;
+    if (open && desktopQuery && desktopQuery.matches) open = false;
+    const was = body.classList.contains("hz-drawer-open");
+    if (was === open) return;
+    body.classList.toggle("hz-drawer-open", open);
+    for (const btn of qsa("[data-hz-drawer-open]")) btn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      const target = qs("#hz-sidebar .nav-link.active") || qs("#hz-sidebar .nav-link");
+      if (target) target.focus({ preventScroll: true });
+    }
+  };
+
+  const onDrawerClick = (e) => {
+    if (!(e.target instanceof Element)) return;
+    if (e.target.closest("[data-hz-drawer-open]")) {
+      e.preventDefault();
+      setDrawer(true);
+      return;
+    }
+    if (e.target.closest("[data-hz-drawer-close]")) {
+      e.preventDefault();
+      setDrawer(false);
+      return;
+    }
+    if (e.target.closest("#hz-sidebar a[href]")) setDrawer(false);
+  };
+
+  let swipe = null;
+  const onSidebarTouchStart = (e) => {
+    if (!document.body.classList.contains("hz-drawer-open") || e.touches.length !== 1) return;
+    swipe = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const onSidebarTouchEnd = (e) => {
+    if (!swipe) return;
+    const t = e.changedTouches && e.changedTouches[0];
+    const dx = t ? t.clientX - swipe.x : 0;
+    const dy = t ? t.clientY - swipe.y : 0;
+    swipe = null;
+    if (dx < -60 && Math.abs(dy) < Math.abs(dx) * 0.7) setDrawer(false);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Toasts (server flash messages are lifted into them)
+  // ---------------------------------------------------------------------------
+  const dismissToast = (el) => {
+    if (!el || !el.isConnected || el.classList.contains("leaving")) return;
+    if (reducedMotion()) {
+      el.remove();
+      return;
+    }
+    el.classList.add("leaving");
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 400);
+  };
+
+  const showToast = (kind, text, timeoutMs) => {
+    const root = qs("#hz-toasts");
+    const msgText = (text || "").toString().trim();
+    if (!root || !msgText) return;
+
+    const el = document.createElement("div");
+    el.className = "toast " + (kind === "err" ? "err" : "ok");
+    el.setAttribute("role", kind === "err" ? "alert" : "status");
+    el.appendChild(iconEl(kind === "err" ? "alert" : "check-circle"));
+
+    const msg = document.createElement("div");
+    msg.className = "toast-msg";
+    msg.textContent = msgText;
+    el.appendChild(msg);
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "icon-btn";
+    close.setAttribute("aria-label", tKey("ui.close", "Close"));
+    close.appendChild(iconEl("x"));
+    close.addEventListener("click", () => dismissToast(el));
+    el.appendChild(close);
+
+    root.appendChild(el);
+    while (root.children.length > 4) root.firstElementChild.remove();
+
+    const ms = typeof timeoutMs === "number" ? timeoutMs : kind === "err" ? 0 : 4200;
+    if (ms > 0) {
+      let timer = setTimeout(() => dismissToast(el), ms);
+      el.addEventListener("pointerenter", () => clearTimeout(timer));
+      el.addEventListener("pointerleave", () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => dismissToast(el), 1800);
+      });
+    }
+  };
+
+  const clearErrorToasts = () => {
+    for (const el of qsa("#hz-toasts .toast.err")) dismissToast(el);
+  };
+
+  const liftFlashes = () => {
+    for (const flash of qsa("#pjax-root .flash")) {
+      showToast(flash.classList.contains("err") ? "err" : "ok", flash.textContent);
+      flash.remove();
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Unsaved-change tracking for forms marked [data-hz-dirty]
+  // ---------------------------------------------------------------------------
+  const onFieldEdited = (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement)) return;
+    if (!t.name) return;
+    const form = t.form;
+    if (!form || !form.hasAttribute("data-hz-dirty")) return;
+    form.classList.add("is-dirty");
+  };
+
+  const hasDirtyForm = () => !!qs("form.is-dirty");
+
+  const confirmLeaveIfDirty = () => {
+    if (!hasDirtyForm()) return Promise.resolve(true);
+    return confirmModal({
+      title: tKey("unsaved.title", "Discard unsaved changes?"),
+      detail: tKey("unsaved.detail", ""),
+      okText: tKey("unsaved.leave", "Leave"),
+    });
+  };
+
+  const onBeforeUnload = (e) => {
+    if (!hasDirtyForm()) return;
+    e.preventDefault();
+    e.returnValue = "";
+  };
+
+  // ---------------------------------------------------------------------------
+  // Page lifecycle
+  // ---------------------------------------------------------------------------
+  let titleObserver = null;
+
+  const watchPageTitle = () => {
+    const bar = qs(".topbar");
+    if (!bar) return;
+    const titleEl = qs("#hz-title");
+    if (titleEl) titleEl.textContent = (document.title || "").replace(/\s*-\s*Hazuki\s*$/, "");
+    if (titleObserver) {
+      titleObserver.disconnect();
+      titleObserver = null;
+    }
+    bar.classList.remove("show-title");
+    const h1 = qs("#pjax-root .page-title");
+    if (!h1 || typeof IntersectionObserver !== "function") return;
+    titleObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (!entry) return;
+        bar.classList.toggle("show-title", !entry.isIntersecting && entry.boundingClientRect.top < 60);
+      },
+      { rootMargin: "-56px 0px 0px 0px" }
+    );
+    titleObserver.observe(h1);
+  };
+
+  const refreshPage = ({ swapped = false } = {}) => {
+    if (swapped) {
+      stopDashboardStats();
+      stopTrafficPage();
+      stopSystemPage();
+    }
+    updateNavActive();
     updateThemeToggle();
+    liftFlashes();
     applyTimeFormatting();
+    initTabs();
     updateSakuyaExampleUrls();
     updateGitPreview();
     updateCdnjsPreview();
@@ -1365,67 +1904,85 @@
     ensureDashboardStats();
     ensureTrafficPage();
     ensureSystemPage();
-    openHashAccordion();
+    watchPageTitle();
   };
 
-  const openHashAccordion = () => {
-    const hash = ((window.location && window.location.hash) || "").toString().trim();
-    if (!hash || hash.length < 2) return;
+  const onVisibilityChange = () => {
+    if (document.hidden) return;
+    const page = currentPage();
+    if (page === "dashboard") pollDashboardStats();
+    else if (page === "traffic") fetchTrafficSeries();
+    else if (page === "system") pollSystemRewriteRuntime();
+  };
 
-    let target = null;
-    try {
-      target = document.querySelector(hash);
-    } catch {
-      return;
+  // ---------------------------------------------------------------------------
+  // Navigation state
+  // ---------------------------------------------------------------------------
+  const navScore = (a, path) => {
+    const hrefs = [a.getAttribute("href") || "", ...(a.getAttribute("data-hz-also") || "").split(/\s+/)];
+    let best = -1;
+    for (const raw of hrefs) {
+      const h = raw.split("?")[0].trim();
+      if (!h) continue;
+      if (h === path) best = Math.max(best, 10000 + h.length);
+      else if (h !== "/" && path.startsWith(h + "/")) best = Math.max(best, h.length);
     }
-    if (!(target instanceof HTMLDetailsElement)) return;
-    if (!target.classList.contains("accordion")) return;
-    target.open = true;
+    return best;
+  };
+
+  const bestNavLink = (pathname) => {
+    const path = (pathname || window.location.pathname || "").toString();
+    let best = null;
+    let bestScore = -1;
+    for (const a of qsa("[data-hz-nav]")) {
+      const s = navScore(a, path);
+      if (s > bestScore) {
+        best = a;
+        bestScore = s;
+      }
+    }
+    return bestScore >= 0 ? best : null;
   };
 
   const updateNavActive = (pathname) => {
-    const path = (pathname || (window.location && window.location.pathname) || "").toString();
-    if (!path) return;
-
-    for (const a of qsa(".nav a")) {
-      const href = (a.getAttribute("href") || "").trim();
-      if (!href) continue;
-      const active = href === path || (href !== "/" && path.startsWith(href + "/"));
-      a.classList.toggle("active", active);
+    const best = bestNavLink(pathname);
+    for (const a of qsa("[data-hz-nav]")) {
+      const on = a === best;
+      a.classList.toggle("active", on);
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
     }
   };
 
   const setNavPending = (pathname) => {
-    const path = (pathname || (window.location && window.location.pathname) || "").toString();
-    if (!path) return;
-
+    document.body.classList.remove("hz-loaded");
     document.body.classList.add("hz-loading");
     const root = qs("#pjax-root");
-    if (root) {
-      root.setAttribute("aria-busy", "true");
-      root.classList.remove("hz-leave", "hz-enter");
-    }
-
-    for (const a of qsa(".nav a")) {
-      const href = (a.getAttribute("href") || "").trim();
-      if (!href) continue;
-      const active = href === path || (href !== "/" && path.startsWith(href + "/"));
-      a.classList.toggle("hz-pending", active);
-    }
+    if (root) root.setAttribute("aria-busy", "true");
+    const best = bestNavLink(pathname);
+    for (const a of qsa("[data-hz-nav]")) a.classList.toggle("hz-pending", a === best);
   };
 
+  let loadedTimer = null;
   const clearNavPending = () => {
-    document.body.classList.remove("hz-loading");
+    const body = document.body;
+    if (body.classList.contains("hz-loading")) {
+      body.classList.remove("hz-loading");
+      body.classList.add("hz-loaded");
+      clearTimeout(loadedTimer);
+      loadedTimer = setTimeout(() => body.classList.remove("hz-loaded"), 450);
+    }
     const root = qs("#pjax-root");
     if (root) root.removeAttribute("aria-busy");
-
-    for (const a of qsa(".nav a.hz-pending")) {
-      a.classList.remove("hz-pending");
-    }
+    for (const a of qsa("[data-hz-nav].hz-pending")) a.classList.remove("hz-pending");
   };
 
+  // ---------------------------------------------------------------------------
+  // PJAX navigation (GET links and opted-in POST forms)
+  // ---------------------------------------------------------------------------
   let navAbortController = null;
   let navSeq = 0;
+  let vtDepth = 0;
 
   const isSameLayout = (doc) => {
     const curHasSidebar = !!qs(".sidebar");
@@ -1435,8 +1992,7 @@
 
   const parseHtml = (html) => {
     try {
-      const parser = new DOMParser();
-      return parser.parseFromString(html, "text/html");
+      return new DOMParser().parseFromString(html, "text/html");
     } catch {
       return null;
     }
@@ -1447,75 +2003,51 @@
     const nextRoot = doc ? doc.querySelector("#pjax-root") : null;
     if (!root || !nextRoot) return false;
 
-    root.innerHTML = nextRoot.innerHTML;
+    root.replaceChildren(...Array.from(nextRoot.childNodes).map((n) => document.importNode(n, true)));
 
     const page = (doc.body && doc.body.getAttribute("data-page")) || "";
-    if (page) {
-      document.body.setAttribute("data-page", page);
-    }
+    if (page) document.body.setAttribute("data-page", page);
 
     const title = doc.title || "";
-    if (title) {
-      document.title = title;
-      const headTitle = qs(".topbar .title");
-      if (headTitle) {
-        const stripped = title.replace(/\s*-\s*Hazuki\s*$/, "");
-        headTitle.textContent = stripped || headTitle.textContent;
-      }
-    }
+    if (title) document.title = title;
 
-    const mobileNav = qs(".mobile-nav");
-    if (mobileNav && "open" in mobileNav) {
-      mobileNav.open = false;
-    }
-
-    // Avoid nav highlight flicker: during PJAX navigation, the URL may not be
-    // updated yet (pushState happens later). Nav state is handled by navigate().
-    refreshPage({ skipNav: true });
+    refreshPage({ swapped: true });
     return true;
   };
 
-  const swapWithTransition = async (doc, isValid) => {
-    const root = qs("#pjax-root");
+  const swapWithTransition = async (doc, isValid, beforeApply) => {
+    let applied = false;
     let ok = false;
     const apply = () => {
-      if (typeof isValid === "function" && !isValid()) return;
+      if (applied) return;
+      applied = true;
+      if (isValid && !isValid()) return;
+      if (beforeApply) beforeApply();
       ok = applyDocToDom(doc);
     };
 
-    if (!root) {
-      apply();
-      return ok;
-    }
-
-    if (typeof isValid === "function" && !isValid()) {
-      return false;
-    }
-
-    if (typeof document.startViewTransition === "function") {
+    if (typeof document.startViewTransition === "function" && !reducedMotion()) {
+      const html = document.documentElement;
+      vtDepth += 1;
+      html.classList.add("hz-vt-nav");
+      const done = () => {
+        vtDepth = Math.max(0, vtDepth - 1);
+        if (!vtDepth) html.classList.remove("hz-vt-nav");
+      };
       try {
-        const vt = document.startViewTransition(() => apply());
-        if (vt && vt.finished) {
-          await vt.finished;
-        }
+        const vt = document.startViewTransition(apply);
+        vt.finished.then(done, done);
+        await vt.updateCallbackDone;
         return ok;
       } catch {
-        // fall through
+        if (!applied) done();
       }
     }
 
-    root.classList.add("hz-leave");
-    await waitTransitionEnd(root, 220);
-    if (typeof isValid === "function" && !isValid()) {
-      root.classList.remove("hz-leave");
-      return false;
+    if (!applied) {
+      apply();
+      if (ok) restartAnimation(qs("#pjax-root"), "hz-page-enter");
     }
-    apply();
-    root.classList.remove("hz-leave");
-    root.classList.add("hz-enter");
-    await nextFrame();
-    root.classList.remove("hz-enter");
-
     return ok;
   };
 
@@ -1536,105 +2068,163 @@
 
     const p = url.pathname || "";
     if (p.startsWith("/assets/")) return true;
+    if (p.startsWith("/_hazuki/")) return true;
     if (p === "/favicon.ico" || p === "/fav.png") return true;
     if (p === "/lang") return true; // needs full reload to update layout translations
-    if (p === "/config/export") return true; // download
 
     return false;
   };
 
-  const navigate = async (url, { replace = false, addHistory = true } = {}) => {
+  const nativeSubmit = (form) => {
+    if (!form) return;
+    form.classList.remove("is-dirty");
+    try {
+      HTMLFormElement.prototype.submit.call(form);
+    } catch {
+      // ignore
+    }
+  };
+
+  const navigate = async (url, opts = {}) => {
+    const { replace = false, addHistory = true, method = "GET", body = null, form = null, keepScroll = false } = opts;
     if (!url) return;
+    const isPost = method === "POST";
     if (!canPjax()) {
-      window.location.href = url.href;
+      if (isPost) nativeSubmit(form);
+      else window.location.href = url.href;
       return;
     }
 
     const mySeq = (navSeq += 1);
+    abortQuietly(navAbortController);
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    navAbortController = controller;
 
-    if (navAbortController && typeof navAbortController.abort === "function") {
-      try {
-        navAbortController.abort();
-      } catch {
-        // ignore
-      }
-    }
+    clearErrorToasts();
+    if (!isPost) updateNavActive(url.pathname);
+    setNavPending(isPost ? window.location.pathname : url.pathname);
 
-    let controller = null;
-    let signal;
-    if (typeof AbortController === "function") {
-      controller = new AbortController();
-      navAbortController = controller;
-      signal = controller.signal;
-    } else {
-      navAbortController = null;
-    }
-
-    updateNavActive(url.pathname);
-    setNavPending(url.pathname);
+    const scrollY = window.scrollY;
 
     try {
       const fetchOpts = {
-        method: "GET",
+        method,
         headers: { Accept: "text/html", "X-Hazuki-Pjax": "1" },
         credentials: "same-origin",
       };
-      if (signal) fetchOpts.signal = signal;
+      if (body) fetchOpts.body = body;
+      if (controller) fetchOpts.signal = controller.signal;
 
       const resp = await fetch(url.href, fetchOpts);
       if (mySeq !== navSeq) return;
-      if (!resp.ok) {
-        window.location.href = url.href;
-        return;
-      }
 
       const ct = (resp.headers.get("content-type") || "").toLowerCase();
-      if (!ct.includes("text/html")) {
-        window.location.href = url.href;
+      if (!ct.includes("text/html") || (!resp.ok && !isPost)) {
+        if (isPost) nativeSubmit(form);
+        else window.location.href = url.href;
         return;
       }
 
       const html = await resp.text();
       if (mySeq !== navSeq) return;
       const doc = parseHtml(html);
-      if (!doc || !doc.documentElement) {
-        window.location.href = url.href;
-        return;
-      }
-
-      if (!isSameLayout(doc)) {
-        window.location.href = resp.url || url.href;
+      if (!doc || !doc.documentElement || !doc.querySelector("#pjax-root")) {
+        if (isPost) nativeSubmit(form);
+        else window.location.href = url.href;
         return;
       }
 
       const finalURL = new URL(resp.url || url.href, window.location.href);
+      if (!isPost && url.hash && !finalURL.hash) finalURL.hash = url.hash;
 
-      const swapped = await swapWithTransition(doc, () => mySeq === navSeq);
+      if (!isSameLayout(doc)) {
+        window.location.href = finalURL.href;
+        return;
+      }
+
+      const samePage = finalURL.pathname === window.location.pathname;
+      const swapped = await swapWithTransition(
+        doc,
+        () => mySeq === navSeq,
+        () => {
+          if (addHistory) {
+            const st = { href: finalURL.href };
+            if (replace || (isPost && finalURL.href === window.location.href)) {
+              window.history.replaceState(st, "", finalURL.href);
+            } else {
+              window.history.pushState(st, "", finalURL.href);
+            }
+          }
+          const y = keepScroll && samePage ? scrollY : 0;
+          window.scrollTo(0, y);
+        }
+      );
       if (mySeq !== navSeq) return;
       if (!swapped) {
         window.location.href = finalURL.href;
         return;
       }
 
-      if (addHistory) {
-        const st = { href: finalURL.href };
-        if (replace) window.history.replaceState(st, "", finalURL.href);
-        else window.history.pushState(st, "", finalURL.href);
+      if (finalURL.hash && !isPost) {
+        let target = null;
+        try {
+          target = document.getElementById(decodeURIComponent(finalURL.hash.slice(1)));
+        } catch {
+          target = null;
+        }
+        if (target) target.scrollIntoView({ block: "start" });
       }
-      updateNavActive(finalURL.pathname);
-      window.scrollTo(0, 0);
     } catch {
-      if (controller && controller.signal && controller.signal.aborted) {
-        return;
-      }
-      window.location.href = url.href;
+      if (controller && controller.signal && controller.signal.aborted) return;
+      if (isPost) showToast("err", tKey("request.failed", "Request failed."));
+      else window.location.href = url.href;
     } finally {
-      if (mySeq === navSeq) {
-        clearNavPending();
-      }
+      if (mySeq === navSeq) clearNavPending();
     }
   };
 
+  const onFormSubmit = (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (e.defaultPrevented) return;
+    if (!form.hasAttribute("data-hz-pjax") || !canPjax()) {
+      form.classList.remove("is-dirty");
+      return;
+    }
+    if ((form.getAttribute("method") || "get").toLowerCase() !== "post") return;
+    if ((form.getAttribute("enctype") || "").toLowerCase().includes("multipart")) return;
+
+    const submitter = e.submitter instanceof HTMLElement ? e.submitter : null;
+    const actionAttr = (submitter && submitter.getAttribute("formaction")) || form.getAttribute("action") || window.location.href;
+    const action = new URL(actionAttr, window.location.href);
+    if (action.origin !== window.location.origin) return;
+
+    e.preventDefault();
+
+    let data;
+    try {
+      data = submitter ? new FormData(form, submitter) : new FormData(form);
+    } catch {
+      data = new FormData(form);
+      if (submitter && submitter.getAttribute("name")) {
+        data.append(submitter.getAttribute("name"), submitter.getAttribute("value") || "");
+      }
+    }
+    const params = new URLSearchParams();
+    for (const [k, v] of data.entries()) {
+      if (typeof v === "string") params.append(k, v);
+    }
+
+    if (submitter instanceof HTMLButtonElement) submitter.disabled = true;
+    form.classList.remove("is-dirty");
+    navigate(action, { method: "POST", body: params, form, keepScroll: true }).finally(() => {
+      if (submitter instanceof HTMLButtonElement && submitter.isConnected) submitter.disabled = false;
+    });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Confirm modal
+  // ---------------------------------------------------------------------------
   const confirmModal = ({ title, detail, okText } = {}) => {
     const t = (title || tKey("modal.confirmTitle", "确认操作")).toString();
     const d = (detail || "").toString();
@@ -1654,7 +2244,7 @@
       let finished = false;
 
       const cleanup = () => {
-        document.removeEventListener("keydown", onKeyDown);
+        document.removeEventListener("keydown", onKeyDown, true);
         okBtn.removeEventListener("click", onOk);
         for (const el of cancelEls) el.removeEventListener("click", onCancel);
       };
@@ -1666,23 +2256,36 @@
 
         document.body.classList.remove("hz-modal-open");
         root.hidden = true;
-        root.classList.add("hz-enter"); // reset for next open
 
         if (prev && typeof prev.focus === "function") {
           try {
-            prev.focus();
+            prev.focus({ preventScroll: true });
           } catch {
             // ignore
           }
         }
-
         resolve(ok);
       };
 
       const onKeyDown = (evt) => {
-        if (evt.key !== "Escape") return;
-        evt.preventDefault();
-        finish(false);
+        if (evt.key === "Escape") {
+          evt.preventDefault();
+          finish(false);
+          return;
+        }
+        if (evt.key === "Tab") {
+          const focusables = qsa("button", root).filter((b) => b.offsetParent !== null);
+          if (!focusables.length) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (evt.shiftKey && document.activeElement === first) {
+            evt.preventDefault();
+            last.focus();
+          } else if (!evt.shiftKey && document.activeElement === last) {
+            evt.preventDefault();
+            first.focus();
+          }
+        }
       };
 
       const onCancel = (evt) => {
@@ -1701,29 +2304,25 @@
         detailEl.style.display = d ? "" : "none";
       }
       okBtn.textContent = (okText || tKey("modal.ok", "确认")).toString();
+      const danger = /删除|清空|清理|轮换|回滚|delete|clear|rotate|restore|discard|leave|离开|放弃/i.test(t + " " + okBtn.textContent);
+      okBtn.classList.toggle("danger", danger);
+      okBtn.classList.toggle("primary", !danger);
 
       for (const el of cancelEls) {
-        // Avoid putting visible text into non-button cancel elements (e.g. the backdrop).
         if (el instanceof HTMLButtonElement) el.textContent = tKey("modal.cancel", "取消");
-        else el.textContent = "";
       }
 
       root.hidden = false;
-      root.classList.add("hz-enter");
       document.body.classList.add("hz-modal-open");
-      void root.offsetHeight;
-      root.classList.remove("hz-enter");
 
-      document.addEventListener("keydown", onKeyDown);
+      document.addEventListener("keydown", onKeyDown, true);
       okBtn.addEventListener("click", onOk);
       for (const el of cancelEls) el.addEventListener("click", onCancel);
 
-      if (typeof okBtn.focus === "function") {
-        try {
-          okBtn.focus();
-        } catch {
-          // ignore
-        }
+      try {
+        okBtn.focus({ preventScroll: true });
+      } catch {
+        // ignore
       }
     });
   };
@@ -1745,13 +2344,17 @@
     confirmModal({ title, detail, okText }).then((ok) => {
       if (!ok) return;
       try {
-        form.submit();
+        if (typeof form.requestSubmit === "function") form.requestSubmit(btn);
+        else nativeSubmit(form);
       } catch {
-        // ignore
+        nativeSubmit(form);
       }
     });
   };
 
+  // ---------------------------------------------------------------------------
+  // Copy helpers
+  // ---------------------------------------------------------------------------
   const copyText = async (raw) => {
     const text = (raw || "").toString();
     if (!text) return false;
@@ -1922,6 +2525,7 @@
     const text = (attrText || el.textContent || "").trim();
     if (!text) return;
 
+    e.preventDefault();
     copyText(text).then((ok) => {
       if (!ok) return;
       flashCopied(el);
@@ -1955,10 +2559,19 @@
     if (shouldBypassPjax(url, a)) return;
 
     e.preventDefault();
-    navigate(url);
+    if (url.href === window.location.href && !hasDirtyForm()) {
+      navigate(url, { replace: true });
+      return;
+    }
+    confirmLeaveIfDirty().then((ok) => {
+      if (!ok) return;
+      for (const f of qsa("form.is-dirty")) f.classList.remove("is-dirty");
+      navigate(url);
+    });
   };
 
   const onPopState = () => {
+    for (const f of qsa("form.is-dirty")) f.classList.remove("is-dirty");
     navigate(new URL(window.location.href), { replace: true, addHistory: false });
   };
 
@@ -1997,10 +2610,21 @@
       name === "defaultTarget"
     ) {
       updateTorcherinoPreview();
-      return;
     }
   };
 
+  const onKeydown = (e) => {
+    if (e.key === "Escape" && document.body.classList.contains("hz-drawer-open")) {
+      setDrawer(false);
+      const opener = qs("[data-hz-drawer-open]");
+      if (opener) opener.focus({ preventScroll: true });
+    }
+  };
+
+  document.addEventListener("click", onDrawerClick);
+  document.addEventListener("click", onTabClick);
+  document.addEventListener("keydown", onTabKeydown);
+  document.addEventListener("keydown", onKeydown);
   document.addEventListener("click", onFormatJsonClick);
   document.addEventListener("change", onTogglePassword);
   document.addEventListener("click", onConfirmSubmitClick);
@@ -2008,16 +2632,32 @@
   document.addEventListener("click", onSakuyaCopyExampleClick);
   document.addEventListener("click", onCopyClick);
   document.addEventListener("click", onLinkClick);
+  document.addEventListener("submit", onFormSubmit);
+  document.addEventListener("invalid", onInvalid, true);
   document.addEventListener("input", onPreviewInput);
   document.addEventListener("change", onPreviewInput);
+  document.addEventListener("input", onFieldEdited);
+  document.addEventListener("change", onFieldEdited);
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  document.addEventListener("touchstart", (e) => {
+    if (e.target instanceof Element && e.target.closest("#hz-sidebar")) onSidebarTouchStart(e);
+  }, { passive: true });
+  document.addEventListener("touchend", onSidebarTouchEnd, { passive: true });
   window.addEventListener("popstate", onPopState);
-  window.addEventListener("hashchange", openHashAccordion);
+  window.addEventListener("beforeunload", onBeforeUnload);
+  window.addEventListener("hashchange", () => initTabs());
   window.addEventListener("storage", (e) => {
-    if (!e) return;
-    if (e.key !== THEME_KEY) return;
+    if (!e || e.key !== THEME_KEY) return;
     applyTheme(getTheme());
     updateThemeToggle();
   });
+  if (desktopQuery) {
+    const onDesktopChange = () => {
+      if (desktopQuery.matches) setDrawer(false);
+    };
+    if (typeof desktopQuery.addEventListener === "function") desktopQuery.addEventListener("change", onDesktopChange);
+    else if (typeof desktopQuery.addListener === "function") desktopQuery.addListener(onDesktopChange);
+  }
 
   applyTheme(getTheme());
 
@@ -2027,5 +2667,5 @@
     refreshPage();
   }
 
-  window.HazukiUI = { qs, qsa, formatJson, navigate };
+  window.HazukiUI = { qs, qsa, formatJson, navigate, showToast, activateTab };
 })();

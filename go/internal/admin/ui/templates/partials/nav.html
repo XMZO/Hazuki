@@ -1,50 +1,26 @@
 {{define "nav"}}
   <nav class="nav" aria-label="Hazuki Admin Navigation">
-    <div class="section">{{.T "nav.section.common"}}</div>
-    <a href="/" class="{{if eq .BodyTemplate "dashboard"}}active{{end}}">
-      <span>{{.T "nav.dashboard"}}</span>
-    </a>
-    <a href="/traffic" class="{{if eq .BodyTemplate "traffic"}}active{{end}}">
-      <span>{{.T "nav.traffic"}}</span>
-    </a>
-    <a href="/system" class="{{if eq .BodyTemplate "system"}}active{{end}}">
-      <span>{{.T "nav.system"}}</span>
-    </a>
-    <a href="/wizard" class="{{if eq .BodyTemplate "wizard"}}active{{end}}">
-      <span>{{.T "nav.wizard"}}</span>
-    </a>
+    <div class="nav-group">
+      <div class="nav-label">{{.T "nav.section.monitor"}}</div>
+      <a href="/" data-hz-nav class="nav-link {{if eq .BodyTemplate "dashboard"}}active{{end}}"><svg class="icon"><use href="#i-grid"/></svg><span>{{.T "nav.dashboard"}}</span></a>
+      <a href="/traffic" data-hz-nav class="nav-link {{if eq .BodyTemplate "traffic"}}active{{end}}"><svg class="icon"><use href="#i-activity"/></svg><span>{{.T "nav.traffic"}}</span></a>
+    </div>
 
-    <div class="section">{{.T "nav.section.services"}}</div>
-    <a href="/config/torcherino" class="{{if eq .BodyTemplate "torcherino"}}active{{end}}">
-      <span>{{.T "nav.torcherino"}}</span>
-    </a>
-    <a href="/config/cdnjs" class="{{if eq .BodyTemplate "cdnjs"}}active{{end}}">
-      <span>{{.T "nav.cdnjs"}}</span>
-    </a>
-    <a href="/config/git" class="{{if eq .BodyTemplate "git"}}active{{end}}">
-      <span>{{.T "nav.git"}}</span>
-    </a>
-    <a href="/config/sakuya/oplist" class="{{if eq .BodyTemplate "sakuya_oplist"}}active{{end}}">
-      <span>{{.T "nav.sakuya"}}</span>
-    </a>
-    <a href="/config/patchouli" class="{{if eq .BodyTemplate "patchouli"}}active{{end}}">
-      <span>{{.T "nav.patchouli"}}</span>
-    </a>
+    <div class="nav-group">
+      <div class="nav-label">{{.T "nav.section.services"}}</div>
+      <a href="/config/torcherino" data-hz-nav class="nav-link {{if eq .BodyTemplate "torcherino"}}active{{end}}"><svg class="icon"><use href="#i-flame"/></svg><span>{{.T "nav.torcherino"}}</span></a>
+      <a href="/config/cdnjs" data-hz-nav class="nav-link {{if eq .BodyTemplate "cdnjs"}}active{{end}}"><svg class="icon"><use href="#i-package"/></svg><span>{{.T "nav.cdnjs"}}</span></a>
+      <a href="/config/git" data-hz-nav class="nav-link {{if eq .BodyTemplate "git"}}active{{end}}"><svg class="icon"><use href="#i-branch"/></svg><span>{{.T "nav.git"}}</span></a>
+      <a href="/config/sakuya/oplist" data-hz-nav class="nav-link {{if eq .BodyTemplate "sakuya_oplist"}}active{{end}}"><svg class="icon"><use href="#i-cloud-down"/></svg><span>{{.T "nav.sakuya"}}</span></a>
+      <a href="/config/patchouli" data-hz-nav class="nav-link {{if eq .BodyTemplate "patchouli"}}active{{end}}"><svg class="icon"><use href="#i-book"/></svg><span>{{.T "nav.patchouli"}}</span></a>
+    </div>
 
-    <div class="section">{{.T "nav.section.data"}}</div>
-    <a href="/config/versions" class="{{if eq .BodyTemplate "versions"}}active{{end}}">
-      <span>{{.T "nav.versions"}}</span>
-    </a>
-    <a href="/config/import" class="{{if eq .BodyTemplate "import"}}active{{end}}">
-      <span>{{.T "nav.import"}}</span>
-    </a>
-    <a href="/config/export" class="{{if eq .BodyTemplate "export"}}active{{end}}">
-      <span>{{.T "nav.export"}}</span>
-    </a>
-
-    <div class="section">{{.T "nav.section.account"}}</div>
-    <a href="/account" class="{{if eq .BodyTemplate "account"}}active{{end}}">
-      <span>{{.T "nav.account"}}</span>
-    </a>
+    <div class="nav-group">
+      <div class="nav-label">{{.T "nav.section.manage"}}</div>
+      <a href="/system" data-hz-nav class="nav-link {{if eq .BodyTemplate "system"}}active{{end}}"><svg class="icon"><use href="#i-server"/></svg><span>{{.T "nav.system"}}</span></a>
+      <a href="/system/redis-cache" data-hz-nav class="nav-link {{if eq .BodyTemplate "redis_cache"}}active{{end}}"><svg class="icon"><use href="#i-database"/></svg><span>{{.T "nav.redisCache"}}</span></a>
+      <a href="/config/versions" data-hz-nav data-hz-also="/config/export /config/import" class="nav-link {{if or (eq .BodyTemplate "versions") (eq .BodyTemplate "export") (eq .BodyTemplate "import")}}active{{end}}"><svg class="icon"><use href="#i-history"/></svg><span>{{.T "nav.versions"}}</span></a>
+      <a href="/wizard" data-hz-nav class="nav-link {{if eq .BodyTemplate "wizard"}}active{{end}}"><svg class="icon"><use href="#i-sparkles"/></svg><span>{{.T "nav.wizard"}}</span></a>
+    </div>
   </nav>
 {{end}}

@@ -1,23 +1,25 @@
 {{define "login"}}
   <div class="auth">
-    <div class="card">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "layout.meta"}}</div>
-
-      <form method="post" action="/login" class="form" style="margin-top:14px;">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <img src="/assets/avatar.png" alt="" width="56" height="56" />
+        <div>
+          <div class="auth-title">Hazuki</div>
+          <div class="auth-sub">{{.T "layout.meta"}}</div>
+        </div>
+      </div>
+      <form method="post" action="/login" class="stack">
         <div class="field">
-          <label>{{.T "auth.username"}}</label>
-          <input type="text" name="username" autocomplete="username" required />
+          <label class="label" for="login-user">{{.T "auth.username"}}</label>
+          <input id="login-user" type="text" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required autofocus />
         </div>
         <div class="field">
-          <label>{{.T "auth.password"}}</label>
-          <input type="password" name="password" autocomplete="current-password" required />
+          <label class="label" for="login-pw">{{.T "auth.password"}}</label>
+          <input id="login-pw" type="password" name="password" autocomplete="current-password" required />
         </div>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "page.login.title"}}</button>
-          {{if not .HasUsers}}<a class="btn" href="/setup">{{.T "login.createAdmin"}}</a>{{end}}
-        </div>
+        <button class="btn primary" type="submit">{{.T "page.login.title"}}</button>
       </form>
+      {{if not .HasUsers}}<div class="auth-alt"><a href="/setup">{{.T "login.createAdmin"}}</a></div>{{end}}
     </div>
   </div>
 {{end}}

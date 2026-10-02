@@ -1,224 +1,206 @@
 {{define "torcherino"}}
-  <div class="grid">
-    <div class="card hz-anchor" id="torcherino-overview">
-      <h2>{{.Title}} <span class="muted small">{{.T "torcherino.tagline"}}</span></h2>
-      <div class="muted small">{{.T "torcherino.subtitle"}}</div>
-      <div class="btn-row">
-        <span class="pill">{{.T "common.serviceUrl"}}：<code>{{.TorcherinoBaseURL}}</code></span>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}} <span class="tag">{{.T "torcherino.tagline"}}</span></h1>
+        <p class="page-desc">{{.T "torcherino.subtitle"}}</p>
+      </div>
+      <div class="page-actions">
         {{if .TorcherinoStatus.Status}}{{template "serviceStatusPill" (statusCtx $ .TorcherinoStatus)}}{{end}}
-        <a class="btn" href="{{.TorcherinoHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.openHealth"}}</a>
+        {{template "copyChip" (dict "Text" .TorcherinoBaseURL "Title" (.T "common.serviceUrl"))}}
+        <a class="btn sm" href="{{.TorcherinoHealthURL}}" target="_blank" rel="noreferrer"><svg class="icon"><use href="#i-pulse"/></svg>{{.T "common.health"}}</a>
       </div>
-      {{if and (eq .TorcherinoStatus.Status "error") .TorcherinoStatus.Error}}
-        <div class="muted small" style="margin-top:10px;">{{.T "common.healthErrorPrefix"}}：{{.TorcherinoStatus.Error}}</div>
-      {{end}}
-      <div class="btn-row hz-page-jump">
-        <a class="btn" href="#torcherino-basic">{{.T "common.basicConfig"}}</a>
-        <a class="btn" href="#torcherino-preview">{{.T "common.preview"}}</a>
-        <a class="btn" href="#torcherino-host-mapping">HOST_MAPPING</a>
-        <a class="btn" href="#torcherino-secret">Worker Secret</a>
-        <a class="btn" href="#torcherino-cache">{{.T "torcherino.redisCacheTitle"}}</a>
-        <a class="btn" href="#torcherino-save">{{.T "common.save"}}</a>
-      </div>
-    </div>
+    </header>
+    {{if and (eq .TorcherinoStatus.Status "error") .TorcherinoStatus.Error}}
+      <div class="callout err"><svg class="icon"><use href="#i-alert"/></svg><div class="callout-body">{{.T "common.healthErrorPrefix"}}：{{.TorcherinoStatus.Error}}</div></div>
+    {{end}}
 
-    <div class="card hz-anchor" id="torcherino-client-info">
-      <h3>{{.T "torcherino.clientInfoTitle"}}</h3>
-      <div class="muted small">{{.T "torcherino.clientInfoHint"}}</div>
-      <div class="grid cols-2" style="margin-top:10px;">
-        <div class="field">
-          <label>{{.T "torcherino.clientInfoClientIP"}}</label>
-          <input type="text" value="{{.TorcherinoClientInfo.ClientIP}}" class="readonly" readonly />
-        </div>
-        <div class="field">
-          <label>{{.T "torcherino.clientInfoCfIP"}}</label>
-          <input type="text" value="{{.TorcherinoClientInfo.CfConnectingIP}}" class="readonly" readonly />
-        </div>
-        <div class="field">
-          <label>{{.T "torcherino.clientInfoRemoteAddr"}}</label>
-          <input type="text" value="{{.TorcherinoClientInfo.RemoteAddr}}" class="readonly" readonly />
-        </div>
-        <div class="field">
-          <label>{{.T "torcherino.clientInfoXRealIP"}}</label>
-          <input type="text" value="{{.TorcherinoClientInfo.XRealIP}}" class="readonly" readonly />
-        </div>
-        <div class="field">
-          <label>{{.T "torcherino.clientInfoXForwardedFor"}}</label>
-          <input type="text" value="{{.TorcherinoClientInfo.XForwardedFor}}" class="readonly" readonly />
-        </div>
-        <div class="field">
-          <label>{{.T "torcherino.clientInfoXHazukiIP"}}</label>
-          <input type="text" value="{{.TorcherinoClientInfo.XHazukiClientIP}}" class="readonly" readonly />
-        </div>
-      </div>
-    </div>
+    <nav class="tabs" role="tablist" data-hz-tabs aria-label="{{.Title}}">
+      <button class="tab" type="button" role="tab" data-hz-tab="basic" aria-selected="true"><svg class="icon"><use href="#i-sliders"/></svg>{{.T "common.basicConfig"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="mapping" aria-selected="false"><svg class="icon"><use href="#i-swap"/></svg>HOST_MAPPING</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="secret" aria-selected="false"><svg class="icon"><use href="#i-lock"/></svg>Worker Secret</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="cache" aria-selected="false"><svg class="icon"><use href="#i-database"/></svg>{{.T "torcherino.redisCacheTitle"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="client" aria-selected="false"><svg class="icon"><use href="#i-monitor"/></svg>{{.T "ui.tab.diagnostics"}}</button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
 
-    <form class="form" method="post" action="/config/torcherino">
-      <div class="card hz-anchor" id="torcherino-basic">
-        <h3>{{.T "common.basicConfig"}}</h3>
-        <div class="grid cols-2">
-          <div class="field">
-            <label>{{.T "common.port"}} <span class="key">ports.torcherino</span></label>
-            <input type="text" name="torcherinoPort" value="{{.TorcherinoPortValue}}" placeholder="3000" />
-            <div class="hint">{{.T "common.modifiedPortRestart"}}</div>
-          </div>
-          <div class="field">
-            <label>{{.T "torcherino.defaultTargetLabel"}} <span class="key">DEFAULT_TARGET</span></label>
-            <input type="text" name="defaultTarget" value="{{.DefaultTargetValue}}" placeholder="xxx.pages.dev" />
-            <div class="hint">{{.T "torcherino.defaultTargetHint"}}</div>
-          </div>
-        </div>
-        <div class="field">
-          <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-            <input type="checkbox" name="serviceEnabled" {{if not .Torcherino.Disabled}}checked{{end}} />
-            <input type="hidden" name="serviceEnabled" value="0" />
-            {{.T "common.enableService"}} <span class="key">torcherino.disabled</span>
-          </label>
-          <div class="hint">{{.T "torcherino.serviceToggleHint"}}</div>
-        </div>
-        <div class="field">
-          <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-            <input type="checkbox" name="forwardClientIp" {{if .Torcherino.ForwardClientIP}}checked{{end}} />
-            <input type="hidden" name="forwardClientIp" value="0" />
-            {{.T "torcherino.forwardClientIpLabel"}} <span class="key">torcherino.forwardClientIp</span>
-          </label>
-          <div class="hint">{{.T "torcherino.forwardClientIpHint"}}</div>
-        </div>
-        <div class="field">
-          <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-            <input type="checkbox" name="trustCfConnectingIp" {{if .Torcherino.TrustCfConnectingIP}}checked{{end}} />
-            <input type="hidden" name="trustCfConnectingIp" value="0" />
-            {{.T "torcherino.trustCfConnectingIpLabel"}} <span class="key">torcherino.trustCfConnectingIp</span>
-          </label>
-          <div class="hint">{{.T "torcherino.trustCfConnectingIpHint"}}</div>
-        </div>
-      </div>
-
-      <details class="card accordion hz-anchor" id="torcherino-preview">
-        <summary>{{.T "common.preview"}} <span class="muted small">{{.T "common.previewNoRequest"}}</span></summary>
-        <div class="body">
-          <div class="muted small">{{.T "torcherino.previewHint"}}</div>
-          <div class="grid cols-2" style="margin-top:10px;">
+    <form class="tab-form" method="post" action="/config/torcherino" data-hz-tabform data-hz-dirty data-hz-pjax>
+      <section class="panel" role="tabpanel" data-hz-panel="basic" id="torcherino-basic">
+        <div class="card">
+          <div class="fields">
             <div class="field">
-              <label>{{.T "common.host"}}</label>
+              <label class="label" for="t-port">{{.T "common.port"}} <span class="key">ports.torcherino</span></label>
+              <input id="t-port" type="text" inputmode="numeric" name="torcherinoPort" value="{{.TorcherinoPortValue}}" placeholder="3000" />
+              <div class="hint">{{.T "common.modifiedPortRestart"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="t-target">{{.T "torcherino.defaultTargetLabel"}} <span class="key">DEFAULT_TARGET</span></label>
+              <input id="t-target" type="text" name="defaultTarget" value="{{.DefaultTargetValue}}" placeholder="xxx.pages.dev" />
+              <div class="hint">{{.T "torcherino.defaultTargetHint"}}</div>
+            </div>
+          </div>
+          <div class="switches">
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "common.enableService"}} <span class="key">torcherino.disabled</span></span>
+                <span class="hint">{{.T "torcherino.serviceToggleHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="serviceEnabled" {{if not .Torcherino.Disabled}}checked{{end}} />
+              <input type="hidden" name="serviceEnabled" value="0" />
+            </label>
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "torcherino.forwardClientIpLabel"}} <span class="key">forwardClientIp</span></span>
+                <span class="hint">{{.T "torcherino.forwardClientIpHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="forwardClientIp" {{if .Torcherino.ForwardClientIP}}checked{{end}} />
+              <input type="hidden" name="forwardClientIp" value="0" />
+            </label>
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "torcherino.trustCfConnectingIpLabel"}} <span class="key">trustCfConnectingIp</span></span>
+                <span class="hint">{{.T "torcherino.trustCfConnectingIpHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="trustCfConnectingIp" {{if .Torcherino.TrustCfConnectingIP}}checked{{end}} />
+              <input type="hidden" name="trustCfConnectingIp" value="0" />
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" role="tabpanel" data-hz-panel="mapping" id="torcherino-host-mapping" hidden>
+        <div class="card">
+          <div class="field">
+            <label class="label" for="hostMappingJson">{{.T "torcherino.hostMappingJsonLabel"}} <span class="key">HOST_MAPPING</span> <span class="opt">{{.T "torcherino.hostMappingTagline"}}</span></label>
+            <textarea id="hostMappingJson" name="hostMappingJson" data-json spellcheck="false">{{.HostMappingJSON}}</textarea>
+            <div class="hint-row">
+              <span class="hint">{{.T "torcherino.hostMappingFormatPrefix"}} <code>{"a.com":"xxx.pages.dev"}</code>{{.T "common.semicolon"}}{{.T "torcherino.hostMappingFormatSuffix"}}{{.T "common.period"}}</span>
+              <span class="json-msg" aria-live="polite"></span>
+              <button class="btn sm" type="button" data-format-json="#hostMappingJson">{{.T "common.formatJson"}}</button>
+            </div>
+          </div>
+        </div>
+        <div class="card" id="torcherino-preview">
+          <div class="card-head">
+            <div class="card-head-text">
+              <div class="card-title"><svg class="icon"><use href="#i-eye"/></svg>{{.T "common.preview"}} <span class="opt muted small">{{.T "common.previewNoRequest"}}</span></div>
+              <div class="card-sub">{{.T "torcherino.previewHint"}}</div>
+            </div>
+          </div>
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="torcherinoPreviewHost">{{.T "common.host"}}</label>
               <input type="text" id="torcherinoPreviewHost" value="example.com" placeholder="example.com" />
               <div class="hint">{{.T "torcherino.matchLogicHintPrefix"}} <code>HOST_MAPPING[strings.ToLower(host)]</code>{{.T "torcherino.matchLogicHintSuffix"}} <code>DEFAULT_TARGET</code>{{.T "common.period"}}</div>
             </div>
             <div class="field">
-              <label>{{.T "common.path"}}</label>
+              <label class="label" for="torcherinoPreviewPath">{{.T "common.path"}}</label>
               <input type="text" id="torcherinoPreviewPath" value="/_hazuki/health" placeholder="/path" />
             </div>
-          </div>
-
-          <div class="field">
-            <label>{{.T "torcherino.previewResult"}}</label>
-            <div class="grid cols-2">
-              <input type="text" id="torcherinoPreviewTarget" value="" class="readonly" readonly />
-              <input type="text" id="torcherinoPreviewUrl" value="" class="readonly" readonly />
-            </div>
-            <div class="hint" id="torcherinoPreviewHint"></div>
-          </div>
-        </div>
-      </details>
-
-      <details class="card accordion hz-anchor" id="torcherino-host-mapping">
-        <summary>HOST_MAPPING <span class="muted small">{{.T "torcherino.hostMappingTagline"}}</span></summary>
-        <div class="body">
-          <div class="field">
-            <label>{{.T "torcherino.hostMappingJsonLabel"}} <span class="key">HOST_MAPPING</span></label>
-            <textarea id="hostMappingJson" name="hostMappingJson" data-json>{{.HostMappingJSON}}</textarea>
-            <div class="hint hint-line">
-              <span>{{.T "torcherino.hostMappingFormatPrefix"}} <code>{"a.com":"xxx.pages.dev"}</code>{{.T "common.semicolon"}}{{.T "torcherino.hostMappingFormatSuffix"}}{{.T "common.period"}}</span>
-              <span class="spacer"></span>
-              <button class="btn" type="button" data-format-json="#hostMappingJson">{{.T "common.formatJson"}}</button>
-              <span class="json-msg" aria-live="polite"></span>
+            <div class="field full">
+              <label class="label">{{.T "torcherino.previewResult"}}</label>
+              <div class="pair">
+                <input type="text" id="torcherinoPreviewTarget" value="" readonly aria-label="target" />
+                <svg class="icon pair-arrow"><use href="#i-arrow-right"/></svg>
+                <input type="text" id="torcherinoPreviewUrl" value="" readonly aria-label="url" />
+              </div>
+              <div class="hint" id="torcherinoPreviewHint"></div>
             </div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="torcherino-secret">
-        <summary>Worker Secret <span class="muted small">{{.T "common.optionalTag"}}</span></summary>
-        <div class="body">
-          <div class="grid cols-2">
+      <section class="panel" role="tabpanel" data-hz-panel="secret" id="torcherino-secret" hidden>
+        <div class="card">
+          <div class="fields">
             <div class="field">
-              <label>{{.T "torcherino.workerSecretHeadersLabel"}} <span class="key">WORKER_SECRET_HEADERS</span></label>
-              <input type="text" name="workerSecretHeaders" value="{{.WorkerSecretHeadersCsvValue}}" placeholder="x-forwarded-by-worker" />
+              <label class="label" for="t-wsh">{{.T "torcherino.workerSecretHeadersLabel"}} <span class="key">WORKER_SECRET_HEADERS</span></label>
+              <input id="t-wsh" type="text" name="workerSecretHeaders" value="{{.WorkerSecretHeadersCsvValue}}" placeholder="x-forwarded-by-worker" />
               <div class="hint">{{.T "torcherino.workerSecretHeadersHint"}} <code>x-forwarded-by-worker</code>{{.T "common.period"}}</div>
             </div>
             <div class="field">
-              <label>{{.T "torcherino.workerSecretKeyLabel"}} <span class="key">WORKER_SECRET_KEY</span></label>
-              <input id="workerSecretKeyInput" type="password" name="workerSecretKey" value="" placeholder="{{if .SecretIsSet}}{{.T "secret.placeholderSetKeep"}}{{else}}{{.T "secret.placeholderEmptyDisable"}}{{end}}" />
-              <div class="hint hint-line">
-                <span class="spacer"></span>
-                <label class="pill" style="font-weight:800;">
-                  <input type="checkbox" data-toggle-password="#workerSecretKeyInput" />
-                  {{.T "common.show"}}
-                </label>
-                <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                  <input type="checkbox" name="clearWorkerSecretKey" />
-                  {{.T "common.clear"}}
-                </label>
+              <label class="label" for="workerSecretKeyInput">{{.T "torcherino.workerSecretKeyLabel"}} <span class="key">WORKER_SECRET_KEY</span></label>
+              {{template "secretInput" (dict "Root" $ "ID" "workerSecretKeyInput" "Name" "workerSecretKey" "Placeholder" (or (and .SecretIsSet (.T "secret.placeholderSetKeep")) (.T "secret.placeholderEmptyDisable")))}}
+              <div class="hint-row">
+                <span class="hint"></span>
+                <label class="check"><input type="checkbox" name="clearWorkerSecretKey" />{{.T "common.clear"}}</label>
+              </div>
+            </div>
+            <div class="field full">
+              <label class="label" for="workerSecretHeaderMapJson">{{.T "torcherino.workerSecretHeaderMapLabel"}} <span class="key">WORKER_SECRET_HEADER_MAP</span></label>
+              <textarea id="workerSecretHeaderMapJson" name="workerSecretHeaderMapJson" data-json spellcheck="false">{{.WorkerSecretHeaderMapJSONValue}}</textarea>
+              <div class="hint-row">
+                <span class="hint"><code>__SET__</code> {{.T "torcherino.setPlaceholderHint"}}</span>
+                <span class="json-msg" aria-live="polite"></span>
+                <label class="check"><input type="checkbox" name="clearWorkerSecretHeaderMap" />{{.T "common.clear"}}</label>
+                <button class="btn sm" type="button" data-format-json="#workerSecretHeaderMapJson">{{.T "common.formatJson"}}</button>
               </div>
             </div>
           </div>
-
-          <div class="field">
-            <label>{{.T "torcherino.workerSecretHeaderMapLabel"}} <span class="key">WORKER_SECRET_HEADER_MAP</span></label>
-            <textarea id="workerSecretHeaderMapJson" name="workerSecretHeaderMapJson" data-json>{{.WorkerSecretHeaderMapJSONValue}}</textarea>
-            <div class="hint hint-line">
-              <span><code>__SET__</code> {{.T "torcherino.setPlaceholderHint"}}</span>
-              <span class="spacer"></span>
-              <button class="btn" type="button" data-format-json="#workerSecretHeaderMapJson">{{.T "common.formatJson"}}</button>
-              <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                <input type="checkbox" name="clearWorkerSecretHeaderMap" />
-                {{.T "common.clear"}}
-              </label>
-              <span class="json-msg" aria-live="polite"></span>
-            </div>
-          </div>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="torcherino-cache">
-        <summary>{{.T "torcherino.redisCacheTitle"}} <span class="muted small">{{.T "common.optionalTag"}}</span></summary>
-        <div class="body">
-          <div class="muted small">{{.T "torcherino.redisCacheHint"}}</div>
-          <div class="grid cols-2" style="margin-top:10px;">
+      <section class="panel" role="tabpanel" data-hz-panel="cache" id="torcherino-cache" hidden>
+        <div class="card">
+          <div class="card-head"><div class="card-sub">{{.T "torcherino.redisCacheHint"}}</div></div>
+          <div class="switches one">
+            <label class="switch-row">
+              <span class="switch-text"><span class="switch-title">{{.T "torcherino.redisCacheEnabledLabel"}}</span></span>
+              <input class="switch" type="checkbox" name="redisCacheEnabled" {{if .RedisCacheEnabled}}checked{{end}} />
+              <input type="hidden" name="redisCacheEnabled" value="0" />
+            </label>
+          </div>
+          <div class="fields">
             <div class="field">
-              <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                <input type="checkbox" name="redisCacheEnabled" {{if .RedisCacheEnabled}}checked{{end}} />
-                <input type="hidden" name="redisCacheEnabled" value="0" />
-                {{.T "torcherino.redisCacheEnabledLabel"}}
-              </label>
-            </div>
-            <div class="field">
-              <label>{{.T "torcherino.redisCacheMaxBodyBytesLabel"}}</label>
-              <input type="text" name="redisCacheMaxBodyBytes" value="{{.RedisCacheMaxBodyBytesValue}}" placeholder="524288" />
+              <label class="label" for="t-rc-max">{{.T "torcherino.redisCacheMaxBodyBytesLabel"}}</label>
+              <input id="t-rc-max" type="text" inputmode="numeric" name="redisCacheMaxBodyBytes" value="{{.RedisCacheMaxBodyBytesValue}}" placeholder="524288" />
               <div class="hint">{{.T "torcherino.redisCacheMaxBodyBytesHint"}}</div>
             </div>
-          </div>
-
-          <div class="grid cols-2">
             <div class="field">
-              <label>{{.T "torcherino.redisCacheDefaultTTLSecondsLabel"}}</label>
-              <input type="text" name="redisCacheDefaultTTLSeconds" value="{{.RedisCacheDefaultTTLSecondsValue}}" placeholder="0" />
+              <label class="label" for="t-rc-def">{{.T "torcherino.redisCacheDefaultTTLSecondsLabel"}}</label>
+              <input id="t-rc-def" type="text" inputmode="numeric" name="redisCacheDefaultTTLSeconds" value="{{.RedisCacheDefaultTTLSecondsValue}}" placeholder="0" />
               <div class="hint">{{.T "torcherino.redisCacheDefaultTTLSecondsHint"}}</div>
             </div>
             <div class="field">
-              <label>{{.T "torcherino.redisCacheMaxTTLSecondsLabel"}}</label>
-              <input type="text" name="redisCacheMaxTTLSeconds" value="{{.RedisCacheMaxTTLSecondsValue}}" placeholder="86400" />
+              <label class="label" for="t-rc-maxttl">{{.T "torcherino.redisCacheMaxTTLSecondsLabel"}}</label>
+              <input id="t-rc-maxttl" type="text" inputmode="numeric" name="redisCacheMaxTTLSeconds" value="{{.RedisCacheMaxTTLSecondsValue}}" placeholder="86400" />
               <div class="hint">{{.T "torcherino.redisCacheMaxTTLSecondsHint"}}</div>
             </div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <div class="card hz-anchor" id="torcherino-save">
-        <h3>{{.T "common.save"}}</h3>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
-        </div>
-      </div>
+      {{template "savebar" (dict "Root" $)}}
     </form>
+
+    <section class="panel" role="tabpanel" data-hz-panel="client" id="torcherino-client-info" hidden>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-head-text">
+            <div class="card-title"><svg class="icon"><use href="#i-monitor"/></svg>{{.T "torcherino.clientInfoTitle"}}</div>
+            <div class="card-sub">{{.T "torcherino.clientInfoHint"}}</div>
+          </div>
+        </div>
+        <dl class="kv">
+          <dt>{{.T "torcherino.clientInfoClientIP"}}</dt><dd>{{if .TorcherinoClientInfo.ClientIP}}<code>{{.TorcherinoClientInfo.ClientIP}}</code>{{else}}-{{end}}</dd>
+          <dt>{{.T "torcherino.clientInfoCfIP"}}</dt><dd>{{if .TorcherinoClientInfo.CfConnectingIP}}<code>{{.TorcherinoClientInfo.CfConnectingIP}}</code>{{else}}-{{end}}</dd>
+          <dt>{{.T "torcherino.clientInfoRemoteAddr"}}</dt><dd>{{if .TorcherinoClientInfo.RemoteAddr}}<code>{{.TorcherinoClientInfo.RemoteAddr}}</code>{{else}}-{{end}}</dd>
+          <dt>{{.T "torcherino.clientInfoXRealIP"}}</dt><dd>{{if .TorcherinoClientInfo.XRealIP}}<code>{{.TorcherinoClientInfo.XRealIP}}</code>{{else}}-{{end}}</dd>
+          <dt>{{.T "torcherino.clientInfoXForwardedFor"}}</dt><dd>{{if .TorcherinoClientInfo.XForwardedFor}}<code>{{.TorcherinoClientInfo.XForwardedFor}}</code>{{else}}-{{end}}</dd>
+          <dt>{{.T "torcherino.clientInfoXHazukiIP"}}</dt><dd>{{if .TorcherinoClientInfo.XHazukiClientIP}}<code>{{.TorcherinoClientInfo.XHazukiClientIP}}</code>{{else}}-{{end}}</dd>
+        </dl>
+      </div>
+    </section>
+  </div>
+{{end}}
+
+{{define "secretInput"}}
+  <div class="input-group">
+    <input id="{{.ID}}" type="password" name="{{.Name}}" value="" placeholder="{{.Placeholder}}" autocomplete="off" spellcheck="false" />
+    <label class="input-addon" title="{{.Root.T "common.show"}}">
+      <input class="sr-only" type="checkbox" data-toggle-password="#{{.ID}}" aria-label="{{.Root.T "common.show"}}" />
+      <svg class="icon i-on"><use href="#i-eye"/></svg>
+      <svg class="icon i-off"><use href="#i-eye-off"/></svg>
+    </label>
   </div>
 {{end}}

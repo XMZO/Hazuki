@@ -1,46 +1,47 @@
 {{define "export"}}
-  <div class="grid">
-    <div class="card">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "export.subtitle"}}</div>
-    </div>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.T "nav.versions"}}</h1>
+        <p class="page-desc">{{.T "export.subtitle"}}</p>
+      </div>
+    </header>
+    {{template "backupTabs" .}}
 
-    <form class="form" method="post" action="/config/export">
-      <div class="card">
-        <div class="field">
-          <label>{{.T "export.keyModeLabel"}}</label>
-          <div class="hint">{{.T "export.keyModeHint"}}</div>
-          <div class="hz-check-row" style="margin-top:10px;">
-            <input id="hz-export-master" type="radio" name="keyMode" value="master" {{if .MasterKeyIsSet}}checked{{end}} />
-            <label for="hz-export-master" class="hz-check-label">{{.T "export.keyModeMaster"}}</label>
-          </div>
-          {{if not .MasterKeyIsSet}}
-            <div class="hint" style="margin-top:6px;">{{.T "export.masterKeyMissing"}}</div>
-          {{end}}
-
-          <div class="hz-check-row" style="margin-top:10px;">
-            <input id="hz-export-pass" type="radio" name="keyMode" value="password" {{if not .MasterKeyIsSet}}checked{{end}} />
-            <label for="hz-export-pass" class="hz-check-label">{{.T "export.keyModePassword"}}</label>
-          </div>
+    <form class="card narrow m0" method="post" action="/config/export">
+      <div class="field">
+        <span class="label">{{.T "export.keyModeLabel"}}</span>
+        <div class="hint">{{.T "export.keyModeHint"}}</div>
+        <div class="choices" style="margin-top:6px">
+          <label class="choice">
+            <input type="radio" name="keyMode" value="master" {{if .MasterKeyIsSet}}checked{{end}} />
+            <span>
+              <span class="choice-title">{{.T "export.keyModeMaster"}}</span>
+              {{if not .MasterKeyIsSet}}<span class="hint" style="display:block">{{.T "export.masterKeyMissing"}}</span>{{end}}
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="keyMode" value="password" {{if not .MasterKeyIsSet}}checked{{end}} />
+            <span class="choice-title">{{.T "export.keyModePassword"}}</span>
+          </label>
         </div>
+      </div>
 
+      <div class="fields form-note">
         <div class="field">
-          <label>{{.T "export.passwordLabel"}}</label>
-          <input type="password" name="password" value="" placeholder="{{.T "export.passwordPlaceholder"}}" />
+          <label class="label" for="ex-pw">{{.T "export.passwordLabel"}}</label>
+          <input id="ex-pw" type="password" name="password" value="" placeholder="{{.T "export.passwordPlaceholder"}}" autocomplete="new-password" />
           <div class="hint">{{.T "export.passwordHint"}}</div>
         </div>
-
         <div class="field">
-          <label>{{.T "export.passwordConfirmLabel"}}</label>
-          <input type="password" name="password2" value="" placeholder="{{.T "export.passwordConfirmPlaceholder"}}" />
+          <label class="label" for="ex-pw2">{{.T "export.passwordConfirmLabel"}}</label>
+          <input id="ex-pw2" type="password" name="password2" value="" placeholder="{{.T "export.passwordConfirmPlaceholder"}}" autocomplete="new-password" />
         </div>
+      </div>
 
-        <div class="btn-row">
-          <button class="btn primary" type="submit" onclick="return confirm({{printf "%q" (.T "export.confirm")}});">{{.T "export.download"}}</button>
-          <a class="btn" href="/config/versions">{{.T "export.backToVersions"}}</a>
-        </div>
+      <div class="card-foot">
+        <button class="btn primary" type="submit" data-confirm-submit="{{.T "export.confirm"}}" data-confirm-ok="{{.T "export.download"}}"><svg class="icon"><use href="#i-download"/></svg>{{.T "export.download"}}</button>
       </div>
     </form>
   </div>
 {{end}}
-

@@ -1,134 +1,94 @@
 {{define "redis_cache"}}
-  <div class="grid hz-redis-cache">
-    <div class="card hz-anchor" id="redis-cache-overview">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "redisCache.subtitle"}}</div>
-      <div class="btn-row">
-        <a class="btn" href="/system">{{.T "nav.system"}}</a>
-        <span class="spacer"></span>
-        <span class="muted small">{{.T "redisCache.namespaceLabel"}}：</span>
-        <a class="btn {{if eq .Namespace "cdnjs"}}primary{{end}}" href="/system/redis-cache?ns=cdnjs&limit={{.Limit}}">{{.T "redisCache.namespace.cdnjs"}}</a>
-        <a class="btn {{if eq .Namespace "torcherino"}}primary{{end}}" href="/system/redis-cache?ns=torcherino&limit={{.Limit}}">{{.T "redisCache.namespace.torcherino"}}</a>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}}</h1>
+        <p class="page-desc">{{.T "redisCache.subtitle"}}</p>
       </div>
-      <div class="btn-row hz-page-jump">
-        <a class="btn" href="#redis-cache-status">{{.T "system.redisTitle"}}</a>
-        {{if eq .Redis.Status "ok"}}<a class="btn" href="#redis-cache-actions">{{.T "redisCache.actions"}}</a>{{end}}
-        {{if eq .Redis.Status "ok"}}<a class="btn" href="#redis-cache-list">{{.T "redisCache.listTitle"}}</a>{{end}}
+      <div class="page-actions">
+        {{template "redisStatusPill" (dict "Root" $ "Status" .Redis)}}
       </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="segmented" role="group" aria-label="{{.T "redisCache.namespaceLabel"}}">
+        <a class="seg {{if eq .Namespace "cdnjs"}}active{{end}}" href="/system/redis-cache?ns=cdnjs&limit={{.Limit}}"><svg class="icon"><use href="#i-package"/></svg>{{.T "redisCache.namespace.cdnjs"}}</a>
+        <a class="seg {{if eq .Namespace "torcherino"}}active{{end}}" href="/system/redis-cache?ns=torcherino&limit={{.Limit}}"><svg class="icon"><use href="#i-flame"/></svg>{{.T "redisCache.namespace.torcherino"}}</a>
+      </div>
+      <span class="spacer"></span>
+      {{if eq .Redis.Status "ok"}}
+        <form class="m0" method="post" action="/system/redis-cache/clear" data-hz-pjax>
+          <input type="hidden" name="ns" value="{{.Namespace}}" />
+          <button
+            class="btn danger-ghost"
+            type="submit"
+            title="{{.T "redisCache.clearHint"}} {{.ClearableDesc}}"
+            data-confirm-submit="{{.T "redisCache.clearConfirmTitle"}}"
+            data-confirm-detail="{{.T "redisCache.clearConfirmDetail"}} ({{.ClearableDesc}})"
+            data-confirm-ok="{{.T "redisCache.clearConfirmOk"}}"
+          ><svg class="icon"><use href="#i-trash"/></svg>{{.T "redisCache.clearAll"}}</button>
+        </form>
+      {{end}}
     </div>
 
-    <details class="card accordion hz-anchor" id="redis-cache-status">
-      <summary>
-        <div class="hz-accordion-head">
-          <span>{{.T "system.redisTitle"}}</span>
-          <span class="muted small">{{.T "redisCache.namespaceLabel"}}：{{.Namespace}}</span>
-        </div>
-      </summary>
-      <div class="body">
-
-      {{if eq .Redis.Status "ok"}}
-        <div class="pill ok">{{.T "redis.ok"}} · {{.Redis.LatencyMS}}ms · <code>{{.Redis.Addr}}</code></div>
-        <div class="kvs" style="margin-top:12px;">
-          <div class="muted">{{.T "system.redis.version"}}</div>
-          <div>{{if .Redis.ServerVersion}}<code>{{.Redis.ServerVersion}}</code>{{else}}-{{end}}</div>
-          <div class="muted">{{.T "system.redis.uptime"}}</div>
-          <div>{{if gt .Redis.UptimeSeconds 0}}<code>{{.Redis.UptimeSeconds}}</code> {{.T "system.seconds"}}{{else}}-{{end}}</div>
-          <div class="muted">{{.T "system.redis.clients"}}</div>
-          <div>{{if gt .Redis.ConnectedClients 0}}<code>{{.Redis.ConnectedClients}}</code>{{else}}-{{end}}</div>
-          <div class="muted">{{.T "system.redis.usedMemory"}}</div>
-          <div>{{if .Redis.UsedMemoryHuman}}<code>{{.Redis.UsedMemoryHuman}}</code>{{else}}-{{end}}</div>
-          <div class="muted">{{.T "system.redis.dbSize"}}</div>
-          <div><code>{{.Redis.DBSize}}</code> {{.T "system.redis.keys"}}</div>
-
-          <div class="muted">{{.T "redisCache.marker"}}</div>
-          <div>
-            {{if .MarkerPresent}}
-              <span class="pill ok">{{.T "redisCache.markerPresent"}}</span>
-            {{else}}
-              <span class="pill">{{.T "redisCache.markerMissing"}}</span>
-            {{end}}
-            <div class="muted small" style="margin-top:8px;">
-              <code>{{.MarkerKey}}</code> = <code>{{.MarkerValue}}</code>
-            </div>
-          </div>
-
-          <div class="muted">{{.T "redisCache.tracked"}}</div>
-          <div>
-            <code>{{.TrackedCount}}</code>
-            <span class="muted small" style="margin-left:6px;">({{.IndexKey}})</span>
-          </div>
-        </div>
-      {{else if eq .Redis.Status "error"}}
-        <div class="pill err">{{.T "redis.error"}} · <code>{{.Redis.Addr}}</code></div>
-        {{if .Redis.Error}}<div class="muted small" style="margin-top:10px;">{{.T "common.errorPrefix"}}：{{.Redis.Error}}</div>{{end}}
-      {{else}}
-        <div class="pill">{{.T "redis.notConfigured"}}</div>
-      {{end}}
-      </div>
-    </details>
-
     {{if eq .Redis.Status "ok"}}
-      <details class="card accordion hz-anchor" id="redis-cache-actions">
-        <summary>
-          <div class="hz-accordion-head">
-            <span>{{.T "redisCache.actions"}}</span>
-            <span class="muted small">{{.T "redisCache.clearHint"}} <code>{{.ClearableDesc}}</code></span>
-          </div>
-        </summary>
-        <div class="body">
-          <form method="post" action="/system/redis-cache/clear">
-            <input type="hidden" name="ns" value="{{.Namespace}}" />
-            <button
-              class="btn danger"
-              type="submit"
-              data-confirm-submit="{{.T "redisCache.clearConfirmTitle"}}"
-              data-confirm-detail="{{.T "redisCache.clearConfirmDetail"}}"
-              data-confirm-ok="{{.T "redisCache.clearConfirmOk"}}"
-            >
-              {{.T "redisCache.clearAll"}}
-            </button>
-          </form>
+      <div class="stats" id="redis-cache-status">
+        <div class="stat"><div class="stat-label">Addr</div><div class="stat-value mono" title="{{.Redis.Addr}}">{{.Redis.Addr}}</div></div>
+        <div class="stat"><div class="stat-label">{{.T "system.redis.version"}}</div><div class="stat-value">{{if .Redis.ServerVersion}}{{.Redis.ServerVersion}}{{else}}-{{end}}</div></div>
+        <div class="stat"><div class="stat-label">{{.T "system.redis.uptime"}}</div><div class="stat-value">{{if gt .Redis.UptimeSeconds 0}}{{.Redis.UptimeSeconds}} {{.T "system.seconds"}}{{else}}-{{end}}</div></div>
+        <div class="stat"><div class="stat-label">{{.T "system.redis.clients"}}</div><div class="stat-value">{{if gt .Redis.ConnectedClients 0}}{{.Redis.ConnectedClients}}{{else}}-{{end}}</div></div>
+        <div class="stat"><div class="stat-label">{{.T "system.redis.usedMemory"}}</div><div class="stat-value">{{if .Redis.UsedMemoryHuman}}{{.Redis.UsedMemoryHuman}}{{else}}-{{end}}</div></div>
+        <div class="stat"><div class="stat-label">{{.T "system.redis.dbSize"}}</div><div class="stat-value">{{.Redis.DBSize}} {{.T "system.redis.keys"}}</div></div>
+        <div class="stat"><div class="stat-label">{{.T "redisCache.tracked"}}</div><div class="stat-value" title="{{.IndexKey}}">{{.TrackedCount}}</div></div>
+        <div class="stat">
+          <div class="stat-label">{{.T "redisCache.marker"}}</div>
+          <div class="stat-value" title="{{.MarkerKey}} = {{.MarkerValue}}">{{if .MarkerPresent}}<span class="pill ok">{{.T "redisCache.markerPresent"}}</span>{{else}}<span class="pill off">{{.T "redisCache.markerMissing"}}</span>{{end}}</div>
         </div>
-      </details>
+      </div>
 
-      <div class="card hz-anchor" id="redis-cache-list">
-        <h3>{{.T "redisCache.listTitle"}}</h3>
+      <section class="card flush" id="redis-cache-list">
+        <div class="card-head">
+          <div class="card-head-text">
+            <div class="card-title">{{.T "redisCache.listTitle"}}</div>
+            <div class="card-sub"><code>{{.ClearableDesc}}</code></div>
+          </div>
+        </div>
         {{if not .Entries}}
-          <div class="muted small">{{.T "redisCache.empty"}}</div>
+          <div class="empty">{{.T "redisCache.empty"}}</div>
         {{else}}
           <div class="table-wrap">
-            <table class="table">
+            <table class="table stack">
               <thead>
                 <tr>
                   <th>{{.T "redisCache.url"}}</th>
                   <th>{{.T "redisCache.type"}}</th>
-                  <th>{{.T "redisCache.size"}}</th>
-                  <th>{{.T "redisCache.ttl"}}</th>
+                  <th class="num">{{.T "redisCache.size"}}</th>
+                  <th class="num">{{.T "redisCache.ttl"}}</th>
                   <th>{{.T "redisCache.updatedAt"}}</th>
-                  <th>{{.T "common.actions"}}</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {{range .Entries}}
                   <tr>
-                    <td>
+                    <td class="cell-main">
                       {{if .URL}}
-                        <code class="hz-ellipsis hz-copy" title="{{.URL}}" data-hz-copy="1">{{.URL}}</code>
+                        <code class="ellipsis hz-copy" title="{{.URL}}" data-hz-copy="1">{{.URL}}</code>
                       {{else}}
-                        <code class="hz-copy" style="opacity:0.7" title="{{.ID}}" data-hz-copy="1">{{.ID}}</code>
+                        <code class="ellipsis hz-copy muted" title="{{.ID}}" data-hz-copy="1">{{.ID}}</code>
                       {{end}}
                     </td>
-                    <td>{{if .Type}}<code>{{.Type}}</code>{{else}}-{{end}}</td>
-                    <td>{{if .SizeHuman}}<code>{{.SizeHuman}}</code>{{else}}{{if gt .SizeBytes 0}}<code>{{.SizeBytes}}</code>{{else}}-{{end}}{{end}}</td>
-                    <td>{{if gt .TTLSeconds 0}}<code>{{.TTLSeconds}}</code>s{{else}}-{{end}}</td>
-                    <td>{{if .UpdatedAt}}<code data-hz-iso="{{.UpdatedAt}}">{{.UpdatedAt}}</code>{{else}}-{{end}}</td>
-                    <td>
-                      <form method="post" action="/system/redis-cache/delete" style="margin:0;">
+                    <td data-label="{{$.T "redisCache.type"}}">{{if .Type}}<code>{{.Type}}</code>{{else}}-{{end}}</td>
+                    <td class="num" data-label="{{$.T "redisCache.size"}}">{{if .SizeHuman}}{{.SizeHuman}}{{else}}{{if gt .SizeBytes 0}}{{.SizeBytes}}{{else}}-{{end}}{{end}}</td>
+                    <td class="num" data-label="{{$.T "redisCache.ttl"}}">{{if gt .TTLSeconds 0}}{{.TTLSeconds}}s{{else}}-{{end}}</td>
+                    <td data-label="{{$.T "redisCache.updatedAt"}}">{{if .UpdatedAt}}<time data-hz-iso="{{.UpdatedAt}}">{{.UpdatedAt}}</time>{{else}}-{{end}}</td>
+                    <td class="actions">
+                      <form method="post" action="/system/redis-cache/delete" class="m0" data-hz-pjax>
                         <input type="hidden" name="id" value="{{.ID}}" />
                         <input type="hidden" name="ns" value="{{$.Namespace}}" />
                         <input type="hidden" name="page" value="{{$.Page}}" />
                         <input type="hidden" name="limit" value="{{$.Limit}}" />
-                        <button class="btn" type="submit">{{$.T "redisCache.deleteOne"}}</button>
+                        <button class="btn sm danger-ghost" type="submit"><svg class="icon"><use href="#i-trash"/></svg>{{$.T "redisCache.deleteOne"}}</button>
                       </form>
                     </td>
                   </tr>
@@ -136,22 +96,31 @@
               </tbody>
             </table>
           </div>
-
-          <div class="btn-row" style="margin-top:12px;">
+          <div class="card-foot pager">
             {{if .HasPrev}}
-              <a class="btn" href="/system/redis-cache?page={{.PrevPage}}&limit={{.Limit}}&ns={{.Namespace}}">{{.T "common.prev"}}</a>
+              <a class="btn sm" href="/system/redis-cache?page={{.PrevPage}}&limit={{.Limit}}&ns={{.Namespace}}"><svg class="icon"><use href="#i-chevron-left"/></svg>{{.T "common.prev"}}</a>
             {{else}}
-              <span class="btn" style="opacity:.5; pointer-events:none;">{{.T "common.prev"}}</span>
+              <span class="btn sm is-disabled"><svg class="icon"><use href="#i-chevron-left"/></svg>{{.T "common.prev"}}</span>
             {{end}}
-
+            <span class="muted small">#{{.Page}}</span>
             {{if .HasNext}}
-              <a class="btn" href="/system/redis-cache?page={{.NextPage}}&limit={{.Limit}}&ns={{.Namespace}}">{{.T "common.next"}}</a>
+              <a class="btn sm" href="/system/redis-cache?page={{.NextPage}}&limit={{.Limit}}&ns={{.Namespace}}">{{.T "common.next"}}<svg class="icon"><use href="#i-chevron-right"/></svg></a>
             {{else}}
-              <span class="btn" style="opacity:.5; pointer-events:none;">{{.T "common.next"}}</span>
+              <span class="btn sm is-disabled">{{.T "common.next"}}<svg class="icon"><use href="#i-chevron-right"/></svg></span>
             {{end}}
           </div>
         {{end}}
+      </section>
+    {{else if eq .Redis.Status "error"}}
+      <div class="callout err">
+        <svg class="icon"><use href="#i-alert"/></svg>
+        <div class="callout-body">
+          <div class="callout-title">{{.T "redis.error"}} · <code>{{.Redis.Addr}}</code></div>
+          {{if .Redis.Error}}<div>{{.T "common.errorPrefix"}}：{{.Redis.Error}}</div>{{end}}
+        </div>
       </div>
+    {{else}}
+      <div class="card"><div class="empty">{{.T "redis.notConfigured"}}</div></div>
     {{end}}
   </div>
 {{end}}

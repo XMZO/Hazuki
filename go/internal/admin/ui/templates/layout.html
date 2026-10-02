@@ -3,7 +3,10 @@
 <html lang="{{.HTMLLang}}">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f4f5f8" media="(prefers-color-scheme: light)" data-hz-theme-color="light" />
+    <meta name="theme-color" content="#0b0d12" media="(prefers-color-scheme: dark)" data-hz-theme-color="dark" />
     <title>{{.Title}} - Hazuki</title>
     <script>
       (() => {
@@ -24,71 +27,84 @@
     <script src="/assets/app.js" defer></script>
   </head>
   <body data-page="{{.BodyTemplate}}" data-lang="{{.LangCode}}" data-tz="{{.TimeZone}}">
-    <div class="app">
-      {{if .User}}
-        <aside class="sidebar">
-          <div class="brand">
-            <img class="logo" src="/assets/avatar.png" alt="" width="40" height="40" aria-hidden="true" />
-            <div>Hazuki</div>
+    <div class="hz-progress" aria-hidden="true"></div>
+    {{template "icons"}}
+    {{if .User}}
+      <div class="app">
+        <aside class="sidebar" id="hz-sidebar" aria-label="Hazuki">
+          <div class="sidebar-head">
+            <a class="brand" href="/">
+              <img class="brand-logo" src="/assets/avatar.png" alt="" width="32" height="32" />
+              <span class="brand-text">
+                <span class="brand-name">Hazuki</span>
+                <span class="brand-sub">{{.T "ui.brandSub"}}</span>
+              </span>
+            </a>
+            <button class="icon-btn drawer-close" type="button" data-hz-drawer-close aria-label="{{.T "ui.close"}}"><svg class="icon"><use href="#i-x"/></svg></button>
           </div>
-          <div class="meta">{{.T "layout.meta"}}</div>
           {{template "nav" .}}
-          <div class="footer">
-            <div class="pill">{{.T "layout.currentUser"}}：<code>{{.User.Username}}</code></div>
-            <form method="post" action="/logout" style="margin:0">
-              <button class="btn" type="submit">{{.T "layout.logout"}}</button>
-            </form>
+          <div class="sidebar-foot">
+            <div class="foot-row">
+              {{template "langSwitch" .}}
+              <span class="spacer"></span>
+              {{template "themeToggle" .}}
+            </div>
+            <div class="foot-row">
+              <a class="user-chip {{if eq .BodyTemplate "account"}}active{{end}}" href="/account" data-hz-nav>
+                <span class="avatar" aria-hidden="true">{{initial .User.Username}}</span>
+                <span class="user-meta">
+                  <span class="user-name">{{.User.Username}}</span>
+                  <span class="user-role">{{.T "nav.account"}}</span>
+                </span>
+              </a>
+              <form method="post" action="/logout" class="m0">
+                <button class="icon-btn" type="submit" title="{{.T "layout.logout"}}" aria-label="{{.T "layout.logout"}}"><svg class="icon"><use href="#i-logout"/></svg></button>
+              </form>
+            </div>
           </div>
         </aside>
-      {{end}}
+        <div class="scrim" data-hz-drawer-close aria-hidden="true"></div>
 
-      <div class="main">
-        <header class="topbar">
-          <div>
-            <div class="title">{{.Title}}</div>
-            {{if .User}}
-              <div class="sub">{{.T "layout.subAuthed"}}</div>
-            {{else}}
-              <div class="sub">{{.T "layout.subGuest"}}</div>
-            {{end}}
-          </div>
+        <div class="main">
+          <header class="topbar">
+            <button class="icon-btn" type="button" data-hz-drawer-open aria-controls="hz-sidebar" aria-expanded="false" aria-label="{{.T "layout.menu"}}"><svg class="icon"><use href="#i-menu"/></svg></button>
+            <div class="topbar-center">
+              <a class="brand topbar-brand" href="/">
+                <img class="brand-logo" src="/assets/avatar.png" alt="" width="26" height="26" />
+                <span class="brand-name">Hazuki</span>
+              </a>
+              <div class="topbar-title" id="hz-title" aria-hidden="true">{{.Title}}</div>
+            </div>
+            {{template "themeToggle" .}}
+          </header>
 
-          <div class="actions">
-            <a class="btn {{if .IsLang "zh"}}primary{{end}}" href="/lang?to=zh" data-no-pjax="1">{{.T "layout.lang.zh"}}</a>
-            <a class="btn {{if .IsLang "en"}}primary{{end}}" href="/lang?to=en" data-no-pjax="1">{{.T "layout.lang.en"}}</a>
-            <button class="btn" type="button" data-theme-toggle>{{.T "layout.theme"}}</button>
-            {{if .User}}
-              <details class="mobile-nav">
-                <summary class="btn">{{.T "layout.menu"}}</summary>
-                <div class="panel">
-                  {{template "nav" .}}
-                  <div style="height:10px;"></div>
-                  <form method="post" action="/logout" style="margin:0">
-                    <button class="btn" type="submit">{{.T "layout.logout"}} ({{.User.Username}})</button>
-                  </form>
-                </div>
-              </details>
-            {{else}}
-              <a class="btn" href="/login">{{.T "layout.login"}}</a>
-            {{end}}
-          </div>
-        </header>
-
-        <main class="container">
-          <div id="pjax-root">
+          <main class="content" id="pjax-root">
             {{template "flash" .}}
             {{render .BodyTemplate .}}
-          </div>
+          </main>
+        </div>
+      </div>
+    {{else}}
+      <div class="auth-shell">
+        <div class="auth-corner">
+          {{template "langSwitch" .}}
+          {{template "themeToggle" .}}
+        </div>
+        <main class="auth-main" id="pjax-root">
+          {{template "flash" .}}
+          {{render .BodyTemplate .}}
         </main>
       </div>
-    </div>
+    {{end}}
+
+    <div class="toasts" id="hz-toasts" aria-live="polite"></div>
 
     <div id="hz-modal" class="hz-modal" hidden>
       <div class="hz-modal-backdrop" data-hz-modal-cancel></div>
       <div class="hz-modal-card" role="dialog" aria-modal="true" aria-labelledby="hz-modal-title" aria-describedby="hz-modal-detail">
         <div class="hz-modal-title" id="hz-modal-title">{{.T "modal.confirmTitle"}}</div>
-        <div class="hz-modal-detail muted small" id="hz-modal-detail"></div>
-        <div class="btn-row" style="margin-top:14px;">
+        <div class="hz-modal-detail" id="hz-modal-detail"></div>
+        <div class="btn-row">
           <button class="btn" type="button" data-hz-modal-cancel>{{.T "modal.cancel"}}</button>
           <button class="btn primary" type="button" data-hz-modal-ok>{{.T "modal.ok"}}</button>
         </div>

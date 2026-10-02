@@ -1,26 +1,28 @@
 {{define "import"}}
-  <div class="grid">
-    <div class="card">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "import.subtitle"}}</div>
-    </div>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.T "nav.versions"}}</h1>
+        <p class="page-desc">{{.T "import.subtitle"}}</p>
+      </div>
+    </header>
+    {{template "backupTabs" .}}
 
-    <form class="form" method="post" action="/config/import" enctype="multipart/form-data">
-      <div class="card">
+    <form class="card narrow m0" method="post" action="/config/import" enctype="multipart/form-data">
+      <div class="fields one">
         <div class="field">
-          <label>{{.T "import.passwordLabel"}}</label>
-          <input type="password" name="password" value="" placeholder="{{.T "import.passwordPlaceholder"}}" />
-          <div class="hint">{{.T "import.passwordHint"}}</div>
-        </div>
-        <div class="field">
-          <label>{{.T "import.backupFileLabel"}}</label>
-          <input type="file" name="backupFile" accept=".hzdb,application/octet-stream" required />
+          <label class="label" for="im-file">{{.T "import.backupFileLabel"}}</label>
+          <input id="im-file" type="file" name="backupFile" accept=".hzdb,application/octet-stream" required />
           <div class="hint">{{.T "import.backupFileHint"}}</div>
         </div>
-        <div class="btn-row">
-          <button class="btn primary" type="submit" onclick="return confirm({{printf "%q" (.T "import.confirm")}});">{{.T "import.importAndSave"}}</button>
-          <a class="btn" href="/config/versions">{{.T "import.backToVersions"}}</a>
+        <div class="field">
+          <label class="label" for="im-pw">{{.T "import.passwordLabel"}}</label>
+          <input id="im-pw" type="password" name="password" value="" placeholder="{{.T "import.passwordPlaceholder"}}" autocomplete="off" />
+          <div class="hint">{{.T "import.passwordHint"}}</div>
         </div>
+      </div>
+      <div class="card-foot">
+        <button class="btn primary" type="submit" data-confirm-submit="{{.T "import.confirm"}}" data-confirm-ok="{{.T "common.import"}}"><svg class="icon"><use href="#i-upload"/></svg>{{.T "import.importAndSave"}}</button>
       </div>
     </form>
   </div>

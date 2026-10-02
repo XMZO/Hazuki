@@ -1,40 +1,47 @@
-{{define "versions"}}
-  <div class="grid">
-    <div class="card">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "versions.subtitle"}}</div>
-      <div class="btn-row">
-        <a class="btn" href="/config/export">{{.T "nav.export"}}</a>
-        <a class="btn" href="/config/import">{{.T "nav.import"}}</a>
-      </div>
-    </div>
+{{define "backupTabs"}}
+  <nav class="tabs" aria-label="{{.T "nav.versions"}}" data-hz-route-tabs>
+    <a class="tab" href="/config/versions" {{if eq .BodyTemplate "versions"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-history"/></svg>{{.T "versions.history"}}</a>
+    <a class="tab" href="/config/export" {{if eq .BodyTemplate "export"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-download"/></svg>{{.T "nav.export"}}</a>
+    <a class="tab" href="/config/import" {{if eq .BodyTemplate "import"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-upload"/></svg>{{.T "nav.import"}}</a>
+    <span class="tab-ink" aria-hidden="true"></span>
+  </nav>
+{{end}}
 
-    <div class="card">
-      <h3>{{.T "versions.history"}}</h3>
+{{define "versions"}}
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.T "nav.versions"}}</h1>
+        <p class="page-desc">{{.T "versions.subtitle"}}</p>
+      </div>
+    </header>
+    {{template "backupTabs" .}}
+
+    <section class="card flush">
       {{if not .Versions}}
-        <div class="muted small">{{.T "versions.none"}}</div>
+        <div class="empty">{{.T "versions.none"}}</div>
       {{else}}
         <div class="table-wrap">
-          <table class="table">
+          <table class="table stack">
             <thead>
               <tr>
                 <th>ID</th>
                 <th>{{.T "versions.time"}}</th>
                 <th>{{.T "versions.user"}}</th>
                 <th>{{.T "common.note"}}</th>
-                <th>{{.T "common.actions"}}</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {{range .Versions}}
                 <tr>
-                  <td><code>{{.ID}}</code></td>
-                  <td><code data-hz-iso="{{.CreatedAt}}">{{.CreatedAt}}</code></td>
-                  <td>{{if .CreatedBy}}{{.CreatedBy}}{{else}}-{{end}}</td>
-                  <td>{{.Note}}</td>
-                  <td>
-                    <form method="post" action="/config/versions/{{.ID}}/restore" style="margin:0;">
-                      <button class="btn" type="submit" onclick="return confirm({{printf "%q" ($.T "versions.confirmRestore")}});">{{$.T "versions.restore"}}</button>
+                  <td class="cell-main"><code>#{{.ID}}</code></td>
+                  <td data-label="{{$.T "versions.time"}}"><time data-hz-iso="{{.CreatedAt}}">{{.CreatedAt}}</time></td>
+                  <td data-label="{{$.T "versions.user"}}">{{if .CreatedBy}}{{.CreatedBy}}{{else}}-{{end}}</td>
+                  <td data-label="{{$.T "common.note"}}">{{if .Note}}{{.Note}}{{else}}<span class="muted">-</span>{{end}}</td>
+                  <td class="actions">
+                    <form method="post" action="/config/versions/{{.ID}}/restore" class="m0" data-hz-pjax>
+                      <button class="btn sm" type="submit" data-confirm-submit="{{$.T "versions.confirmRestore"}}" data-confirm-ok="{{$.T "versions.restore"}}"><svg class="icon"><use href="#i-history"/></svg>{{$.T "versions.restore"}}</button>
                     </form>
                   </td>
                 </tr>
@@ -43,6 +50,6 @@
           </table>
         </div>
       {{end}}
-    </div>
+    </section>
   </div>
 {{end}}

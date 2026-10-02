@@ -1,421 +1,267 @@
 {{define "system"}}
-  <div class="grid hz-system-page">
-    <div class="card hz-anchor" id="system-overview">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "system.subtitle"}}</div>
-      <div class="btn-row hz-system-jump">
-        <a class="btn" href="#system-overview">{{.T "system.runtimeTitle"}}</a>
-        <a class="btn" href="#system-panel">{{.T "system.timezoneTitle"}}</a>
-        <a class="btn" href="#system-security">{{.T "system.masterKeyTitle"}}</a>
-        <a class="btn" href="#system-health">{{.T "system.servicesTitle"}}</a>
-        <a class="btn" href="#system-redis">{{.T "system.redisTitle"}}</a>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}}</h1>
+        <p class="page-desc">{{.T "system.subtitle"}}</p>
       </div>
-    </div>
+      <div class="page-actions">
+        <a class="btn" href="/system/redis-cache"><svg class="icon"><use href="#i-database"/></svg>{{.T "system.redis.cacheManage"}}</a>
+      </div>
+    </header>
 
-    <div class="grid cols-2">
-      <div class="card">
-        <h3>{{.T "system.runtimeTitle"}}</h3>
-        <div class="kvs">
-          <div class="muted">{{.T "system.now"}}</div>
-          <div><code data-hz-iso="{{.Now}}">{{.Now}}</code></div>
-          <div class="muted">{{.T "system.startedAt"}}</div>
-          <div><code data-hz-iso="{{.StartedAt}}">{{.StartedAt}}</code></div>
-          <div class="muted">{{.T "system.uptime"}}</div>
-          <div><code>{{.Uptime}}</code></div>
-          <div class="muted">{{.T "system.go"}}</div>
-          <div><code>{{.GoVersion}}</code></div>
-          <div class="muted">{{.T "system.build"}}</div>
-          <div><code>{{.BuildVersion}}</code></div>
-          <div class="muted">{{.T "system.sessionTTL"}}</div>
-          <div><code>{{.SessionTTLSeconds}}</code> {{.T "system.seconds"}}</div>
+    <nav class="tabs" role="tablist" data-hz-tabs aria-label="{{.Title}}">
+      <button class="tab" type="button" role="tab" data-hz-tab="overview" aria-selected="true"><svg class="icon"><use href="#i-server"/></svg>{{.T "ui.tab.overview"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="rewrite" aria-selected="false"><svg class="icon"><use href="#i-gauge"/></svg>{{.T "system.rewriteRuntimeTitle"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="security" aria-selected="false"><svg class="icon"><use href="#i-key"/></svg>{{.T "ui.tab.security"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="prefs" aria-selected="false"><svg class="icon"><use href="#i-clock"/></svg>{{.T "ui.tab.preferences"}}</button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
+
+    <section class="panel" role="tabpanel" data-hz-panel="overview" id="system-overview">
+      <div class="grid cols-2">
+        <div class="card">
+          <div class="card-head"><div class="card-title"><svg class="icon"><use href="#i-clock"/></svg>{{.T "system.runtimeTitle"}}</div></div>
+          <dl class="kv">
+            <dt>{{.T "system.now"}}</dt><dd><time data-hz-iso="{{.Now}}">{{.Now}}</time></dd>
+            <dt>{{.T "system.startedAt"}}</dt><dd><time data-hz-iso="{{.StartedAt}}">{{.StartedAt}}</time></dd>
+            <dt>{{.T "system.uptime"}}</dt><dd>{{.Uptime}}</dd>
+            <dt>{{.T "system.go"}}</dt><dd><code>{{.GoVersion}}</code></dd>
+            <dt>{{.T "system.build"}}</dt><dd><code>{{.BuildVersion}}</code></dd>
+            <dt>{{.T "system.sessionTTL"}}</dt><dd>{{.SessionTTLSeconds}} {{.T "system.seconds"}}</dd>
+          </dl>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title"><svg class="icon"><use href="#i-database"/></svg>{{.T "system.configTitle"}}</div>
+            <div class="btn-row">
+              <a class="btn sm" href="/config/versions">{{.T "nav.versions"}}</a>
+              <a class="btn sm" href="/config/export"><svg class="icon"><use href="#i-download"/></svg>{{.T "nav.export"}}</a>
+            </div>
+          </div>
+          <dl class="kv">
+            <dt>{{.T "system.configUpdatedAt"}}</dt><dd><time data-hz-iso="{{.ConfigUpdatedAt}}">{{.ConfigUpdatedAt}}</time></dd>
+            <dt>{{.T "system.encryption"}}</dt>
+            <dd>{{if .EncryptionEnabled}}<span class="pill ok">{{.T "common.enabled"}}</span>{{else}}<span class="pill err">{{.T "common.disabled"}}</span>{{end}}</dd>
+            <dt>{{.T "system.sqlite"}}</dt><dd><code>{{.DBPath}}</code></dd>
+            <dt>{{.T "system.dbSize"}}</dt><dd>{{.DBSize}}</dd>
+            <dt>{{.T "system.adminUsers"}} / {{.T "system.sessionsCount"}}</dt><dd>{{.UsersCount}} / {{.SessionsCount}}</dd>
+            <dt>{{.T "system.versionsCount"}}</dt><dd>{{.VersionsCount}}</dd>
+          </dl>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-head-text">
+              <div class="card-title"><svg class="icon"><use href="#i-pulse"/></svg>{{.T "system.servicesTitle"}}</div>
+              <div class="card-sub">{{.T "system.servicesHint"}}</div>
+            </div>
+          </div>
+          <ul class="health-list">
+            {{template "healthRow" (dict "Root" $ "Name" "Admin" "Port" .Ports.Admin "Status" .AdminStatus)}}
+            {{template "healthRow" (dict "Root" $ "Name" "Torcherino" "Port" .Ports.Torcherino "Status" .TorcherinoStatus)}}
+            {{template "healthRow" (dict "Root" $ "Name" (.T "nav.cdnjs") "Port" .Ports.Cdnjs "Status" .CdnjsStatus)}}
+            {{template "healthRow" (dict "Root" $ "Name" "GitHub Raw" "Port" .Ports.Git "Status" .GitStatus)}}
+            {{template "healthRow" (dict "Root" $ "Name" "Sakuya · Oplist" "Port" .Ports.Sakuya "Status" .SakuyaOplistStatus)}}
+            {{template "healthRow" (dict "Root" $ "Name" (.T "nav.patchouli") "Port" .Ports.Patchouli "Status" .PatchouliStatus)}}
+          </ul>
+        </div>
+
+        <div class="card" id="system-redis">
+          <div class="card-head">
+            <div class="card-title"><svg class="icon"><use href="#i-database"/></svg>{{.T "system.redisTitle"}}</div>
+            {{template "redisStatusPill" (dict "Root" $ "Status" .Redis)}}
+          </div>
+          {{if eq .Redis.Status "ok"}}
+            <dl class="kv">
+              <dt>Addr</dt><dd><code>{{.Redis.Addr}}</code></dd>
+              <dt>{{.T "system.redis.version"}}</dt><dd>{{if .Redis.ServerVersion}}{{.Redis.ServerVersion}}{{else}}-{{end}}</dd>
+              <dt>{{.T "system.redis.uptime"}}</dt><dd>{{if gt .Redis.UptimeSeconds 0}}{{.Redis.UptimeSeconds}} {{.T "system.seconds"}}{{else}}-{{end}}</dd>
+              <dt>{{.T "system.redis.clients"}}</dt><dd>{{if gt .Redis.ConnectedClients 0}}{{.Redis.ConnectedClients}}{{else}}-{{end}}</dd>
+              <dt>{{.T "system.redis.usedMemory"}}</dt><dd>{{if .Redis.UsedMemoryHuman}}{{.Redis.UsedMemoryHuman}}{{else}}-{{end}}</dd>
+              <dt>{{.T "system.redis.dbSize"}}</dt><dd>{{.Redis.DBSize}} {{.T "system.redis.keys"}}</dd>
+            </dl>
+            <div class="card-foot"><a class="btn sm" href="/system/redis-cache">{{.T "system.redis.cacheManage"}}<svg class="icon"><use href="#i-arrow-right"/></svg></a></div>
+          {{else if eq .Redis.Status "error"}}
+            <dl class="kv"><dt>Addr</dt><dd><code>{{.Redis.Addr}}</code></dd></dl>
+            {{if .Redis.Error}}<div class="callout err form-note"><svg class="icon"><use href="#i-alert"/></svg><div class="callout-body">{{.T "common.errorPrefix"}}：{{.Redis.Error}}</div></div>{{end}}
+          {{else}}
+            <div class="empty">{{.T "redis.notConfigured"}}</div>
+          {{end}}
         </div>
       </div>
+    </section>
 
-      <div class="card">
-        <h3>{{.T "system.configTitle"}}</h3>
-        <div class="kvs">
-          <div class="muted">{{.T "system.configUpdatedAt"}}</div>
-          <div><code data-hz-iso="{{.ConfigUpdatedAt}}">{{.ConfigUpdatedAt}}</code></div>
-          <div class="muted">{{.T "system.encryption"}}</div>
-          <div>
-            {{if .EncryptionEnabled}}
-              <span class="pill ok">{{.T "common.enabled"}}</span>
-            {{else}}
-              <span class="pill err">{{.T "common.disabled"}}</span>
-            {{end}}
+    <section class="panel" role="tabpanel" data-hz-panel="rewrite" id="system-rewrite-runtime" hidden>
+      <div class="card" data-hz-rewrite-runtime-card>
+        <div class="card-head">
+          <div class="card-head-text">
+            <div class="card-title"><svg class="icon"><use href="#i-gauge"/></svg>{{.T "system.rewriteRuntimeTitle"}}</div>
+            <div class="card-sub">{{.T "system.rewriteRuntimeHint"}}</div>
           </div>
-          <div class="muted">{{.T "system.sqlite"}}</div>
-          <div><code>{{.DBPath}}</code></div>
-          <div class="muted">{{.T "system.dbSize"}}</div>
-          <div><code>{{.DBSize}}</code></div>
-          <div class="muted">{{.T "system.adminUsers"}}</div>
-          <div><code>{{.UsersCount}}</code></div>
-          <div class="muted">{{.T "system.versionsCount"}}</div>
-          <div><code>{{.VersionsCount}}</code></div>
-          <div class="muted">{{.T "system.sessionsCount"}}</div>
-          <div><code>{{.SessionsCount}}</code></div>
+          <a class="btn sm" href="/_hazuki/system/rewrite-trace?download=1" data-no-pjax="1" download><svg class="icon"><use href="#i-download"/></svg>{{.T "system.rewriteRuntime.exportTrace"}}</a>
         </div>
-        <div class="btn-row">
-          <a class="btn" href="/config/versions">{{.T "nav.versions"}}</a>
-          <a class="btn" href="/config/export">{{.T "nav.export"}}</a>
-        </div>
-      </div>
 
-      <div class="card hz-system-wide hz-anchor hz-rewrite-runtime" id="system-rewrite-runtime" data-hz-rewrite-runtime-card>
-        <div class="hz-rewrite-runtime-head">
-          <div>
-            <h3>{{.T "system.rewriteRuntimeTitle"}}</h3>
-            <div class="muted small">{{.T "system.rewriteRuntimeHint"}}</div>
-          </div>
-          <div class="btn-row">
-            <a class="btn" href="/_hazuki/system/rewrite-trace?download=1">{{.T "system.rewriteRuntime.exportTrace"}}</a>
-          </div>
-          <div class="segmented" data-hz-rewrite-tabs>
+        <div class="stats">
+          {{template "stat" (dict "Label" (.T "system.gitRewrite.budgetSource") "Field" "shared.budgetSource" "Value" .RewriteRuntime.Shared.BudgetSource)}}
+          {{template "stat" (dict "Label" (.T "system.gitRewrite.memoryBudget") "Field" "shared.memoryBudget" "Value" .RewriteRuntime.Shared.MemoryBudget)}}
+          {{template "stat" (dict "Label" (.T "system.gitRewrite.goUsed") "Field" "shared.goUsed" "Value" .RewriteRuntime.Shared.GoUsed)}}
+          {{template "stat" (dict "Label" (.T "system.gitRewrite.effectiveUsed") "Field" "shared.effectiveUsed" "Value" .RewriteRuntime.Shared.EffectiveUsed)}}
+          {{template "stat" (dict "Label" (.T "system.gitRewrite.cgroupCurrent") "Field" "shared.cgroupCurrent" "Value" .RewriteRuntime.Shared.CgroupCurrent)}}
+          {{template "stat" (dict "Label" (.T "system.gitRewrite.cgroupEvents") "Field" "shared.cgroupEvents" "Value" .RewriteRuntime.Shared.CgroupEvents)}}
+          {{template "stat" (dict "Label" (.T "system.gitRewrite.activeRewrites") "Field" "shared.activeRewrites" "Value" .RewriteRuntime.Shared.ActiveRewrites)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.inflightWeight") "Field" "shared.activeRewriteWeight" "Value" .RewriteRuntime.Shared.ActiveRewriteWeight)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.bufferedAdmission") "Field" "shared.bufferedAdmission" "Value" .RewriteRuntime.Shared.BufferedAdmission)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.bufferedFallbacks") "Field" "shared.bufferedFallbacks" "Value" .RewriteRuntime.Shared.BufferedFallbacks)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.pressure") "Field" "shared.adaptivePressure" "Value" .RewriteRuntime.Shared.AdaptivePressure)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.traceSamples") "Field" "shared.adaptiveTraceSamples" "Value" .RewriteRuntime.Shared.AdaptiveTraceSamples)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.predictedUtilization") "Field" "shared.predictedUtilization" "Value" .RewriteRuntime.Shared.PredictedUtilization)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.learnedAdmissionShare") "Field" "shared.learnedAdmissionShare" "Value" .RewriteRuntime.Shared.LearnedAdmissionShare)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.gcTarget") "Field" "shared.adaptiveGC" "Value" .RewriteRuntime.Shared.AdaptiveGC)}}
+          {{template "stat" (dict "Label" (.T "system.rewriteRuntime.gcMode") "Field" "shared.adaptiveMode" "Value" .RewriteRuntime.Shared.AdaptiveMode)}}
+        </div>
+
+        <hr class="divider" />
+
+        <div class="card-head">
+          <div class="segmented" data-hz-rewrite-tabs role="group">
             <button class="seg active" type="button" data-hz-rewrite-tab="gitHTML">{{.T "system.rewriteRuntime.tab.gitHTML"}}</button>
             <button class="seg" type="button" data-hz-rewrite-tab="torcherinoHTML">{{.T "system.rewriteRuntime.tab.torcherinoHTML"}}</button>
             <button class="seg" type="button" data-hz-rewrite-tab="torcherinoJSON">{{.T "system.rewriteRuntime.tab.torcherinoJSON"}}</button>
           </div>
         </div>
 
-        <div class="hz-metric-grid hz-metric-grid-summary">
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.gitRewrite.budgetSource"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.budgetSource">{{.RewriteRuntime.Shared.BudgetSource}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.gitRewrite.memoryBudget"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.memoryBudget">{{.RewriteRuntime.Shared.MemoryBudget}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.gitRewrite.goUsed"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.goUsed">{{.RewriteRuntime.Shared.GoUsed}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.gitRewrite.effectiveUsed"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.effectiveUsed">{{.RewriteRuntime.Shared.EffectiveUsed}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.gitRewrite.cgroupCurrent"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.cgroupCurrent">{{.RewriteRuntime.Shared.CgroupCurrent}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.gitRewrite.cgroupEvents"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.cgroupEvents">{{.RewriteRuntime.Shared.CgroupEvents}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.activeRewrites">{{.RewriteRuntime.Shared.ActiveRewrites}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.inflightWeight"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.activeRewriteWeight">{{.RewriteRuntime.Shared.ActiveRewriteWeight}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.bufferedAdmission"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.bufferedAdmission">{{.RewriteRuntime.Shared.BufferedAdmission}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.bufferedFallbacks"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.bufferedFallbacks">{{.RewriteRuntime.Shared.BufferedFallbacks}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.pressure"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.adaptivePressure">{{.RewriteRuntime.Shared.AdaptivePressure}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.traceSamples"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.adaptiveTraceSamples">{{.RewriteRuntime.Shared.AdaptiveTraceSamples}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.predictedUtilization"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.predictedUtilization">{{.RewriteRuntime.Shared.PredictedUtilization}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.learnedAdmissionShare"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.learnedAdmissionShare">{{.RewriteRuntime.Shared.LearnedAdmissionShare}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.gcTarget"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.adaptiveGC">{{.RewriteRuntime.Shared.AdaptiveGC}}</code></div>
-          </div>
-          <div class="hz-metric">
-            <div class="hz-metric-label">{{.T "system.rewriteRuntime.gcMode"}}</div>
-            <div class="hz-metric-value"><code data-hz-rewrite-field="shared.adaptiveMode">{{.RewriteRuntime.Shared.AdaptiveMode}}</code></div>
-          </div>
-        </div>
-
-        <div class="hz-rewrite-panels">
-          <section class="hz-rewrite-panel" data-hz-rewrite-panel="gitHTML">
-            <div class="hz-rewrite-panel-head">
-              <div>
-                <div class="hz-rewrite-panel-title">{{.T "system.rewriteRuntime.tab.gitHTML"}}</div>
-                <div class="muted small">{{.T "system.rewriteRuntime.gitHint"}}</div>
-              </div>
-              <span class="pill {{if .RewriteRuntime.GitHTML.Enabled}}ok{{else}}err{{end}}" data-hz-rewrite-enabled-pill="gitHTML">{{if .RewriteRuntime.GitHTML.Enabled}}{{.T "common.enabled"}}{{else}}{{.T "common.disabled"}}{{end}}</span>
-            </div>
-            <div class="hz-metric-grid hz-metric-grid-detail">
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.activeRewrites">{{.RewriteRuntime.GitHTML.ActiveRewrites}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.reserve"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.reserve">{{.RewriteRuntime.GitHTML.Reserve}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.headroom"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.headroom">{{.RewriteRuntime.GitHTML.Headroom}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedLimit"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.bufferedLimit">{{.RewriteRuntime.GitHTML.BufferedLimit}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamChunk"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.streamChunk">{{.RewriteRuntime.GitHTML.StreamChunk}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.unknownLength"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.unknownLength">{{.RewriteRuntime.GitHTML.UnknownLength}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.calibrationSamples"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.calibrationSamples">{{.RewriteRuntime.GitHTML.CalibrationSamples}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.recentBodyP90"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.recentBodyP90">{{.RewriteRuntime.GitHTML.RecentBodyP90}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedCostFactor"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.bufferedCostFactor">{{.RewriteRuntime.GitHTML.BufferedCostFactor}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.usableShare"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.usableShare">{{.RewriteRuntime.GitHTML.UsableShare}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.bufferedSpeed">{{.RewriteRuntime.GitHTML.BufferedSpeed}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="gitHTML.streamSpeed">{{.RewriteRuntime.GitHTML.StreamSpeed}}</code></div></div>
-            </div>
-          </section>
-
-          <section class="hz-rewrite-panel" data-hz-rewrite-panel="torcherinoHTML" hidden>
-            <div class="hz-rewrite-panel-head">
-              <div>
-                <div class="hz-rewrite-panel-title">{{.T "system.rewriteRuntime.tab.torcherinoHTML"}}</div>
-                <div class="muted small">{{.T "system.rewriteRuntime.torcherinoHTMLHint"}}</div>
-              </div>
-              <span class="pill {{if .RewriteRuntime.TorcherinoHTML.Enabled}}ok{{else}}err{{end}}" data-hz-rewrite-enabled-pill="torcherinoHTML">{{if .RewriteRuntime.TorcherinoHTML.Enabled}}{{.T "common.enabled"}}{{else}}{{.T "common.disabled"}}{{end}}</span>
-            </div>
-            <div class="hz-metric-grid hz-metric-grid-detail">
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.activeRewrites">{{.RewriteRuntime.TorcherinoHTML.ActiveRewrites}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.reserve"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.reserve">{{.RewriteRuntime.TorcherinoHTML.Reserve}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.headroom"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.headroom">{{.RewriteRuntime.TorcherinoHTML.Headroom}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedLimit"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.bufferedLimit">{{.RewriteRuntime.TorcherinoHTML.BufferedLimit}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamChunk"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.streamChunk">{{.RewriteRuntime.TorcherinoHTML.StreamChunk}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.unknownLength"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.unknownLength">{{.RewriteRuntime.TorcherinoHTML.UnknownLength}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.calibrationSamples"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.calibrationSamples">{{.RewriteRuntime.TorcherinoHTML.CalibrationSamples}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.recentBodyP90"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.recentBodyP90">{{.RewriteRuntime.TorcherinoHTML.RecentBodyP90}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedCostFactor"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.bufferedCostFactor">{{.RewriteRuntime.TorcherinoHTML.BufferedCostFactor}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.usableShare"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.usableShare">{{.RewriteRuntime.TorcherinoHTML.UsableShare}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.bufferedSpeed">{{.RewriteRuntime.TorcherinoHTML.BufferedSpeed}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoHTML.streamSpeed">{{.RewriteRuntime.TorcherinoHTML.StreamSpeed}}</code></div></div>
-            </div>
-          </section>
-
-          <section class="hz-rewrite-panel" data-hz-rewrite-panel="torcherinoJSON" hidden>
-            <div class="hz-rewrite-panel-head">
-              <div>
-                <div class="hz-rewrite-panel-title">{{.T "system.rewriteRuntime.tab.torcherinoJSON"}}</div>
-                <div class="muted small">{{.T "system.rewriteRuntime.torcherinoJSONHint"}}</div>
-              </div>
-              <span class="pill {{if .RewriteRuntime.TorcherinoJSON.Enabled}}ok{{else}}err{{end}}" data-hz-rewrite-enabled-pill="torcherinoJSON">{{if .RewriteRuntime.TorcherinoJSON.Enabled}}{{.T "common.enabled"}}{{else}}{{.T "common.disabled"}}{{end}}</span>
-            </div>
-            <div class="hz-metric-grid hz-metric-grid-detail">
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.activeRewrites"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.activeRewrites">{{.RewriteRuntime.TorcherinoJSON.ActiveRewrites}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.reserve"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.reserve">{{.RewriteRuntime.TorcherinoJSON.Reserve}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.headroom"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.headroom">{{.RewriteRuntime.TorcherinoJSON.Headroom}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedLimit"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.bufferedLimit">{{.RewriteRuntime.TorcherinoJSON.BufferedLimit}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamChunk"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.streamChunk">{{.RewriteRuntime.TorcherinoJSON.StreamChunk}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.unknownLength"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.unknownLength">{{.RewriteRuntime.TorcherinoJSON.UnknownLength}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.calibrationSamples"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.calibrationSamples">{{.RewriteRuntime.TorcherinoJSON.CalibrationSamples}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.rewriteRuntime.recentBodyP90"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.recentBodyP90">{{.RewriteRuntime.TorcherinoJSON.RecentBodyP90}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedCostFactor"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.bufferedCostFactor">{{.RewriteRuntime.TorcherinoJSON.BufferedCostFactor}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.usableShare"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.usableShare">{{.RewriteRuntime.TorcherinoJSON.UsableShare}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.bufferedSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.bufferedSpeed">{{.RewriteRuntime.TorcherinoJSON.BufferedSpeed}}</code></div></div>
-              <div class="hz-metric"><div class="hz-metric-label">{{.T "system.gitRewrite.streamSpeed"}}</div><div class="hz-metric-value"><code data-hz-rewrite-field="torcherinoJSON.streamSpeed">{{.RewriteRuntime.TorcherinoJSON.StreamSpeed}}</code></div></div>
-            </div>
-          </section>
-        </div>
+        {{template "rewritePanel" (dict "Root" $ "Key" "gitHTML" "Hint" (.T "system.rewriteRuntime.gitHint") "S" .RewriteRuntime.GitHTML "Hidden" false)}}
+        {{template "rewritePanel" (dict "Root" $ "Key" "torcherinoHTML" "Hint" (.T "system.rewriteRuntime.torcherinoHTMLHint") "S" .RewriteRuntime.TorcherinoHTML "Hidden" true)}}
+        {{template "rewritePanel" (dict "Root" $ "Key" "torcherinoJSON" "Hint" (.T "system.rewriteRuntime.torcherinoJSONHint") "S" .RewriteRuntime.TorcherinoJSON "Hidden" true)}}
       </div>
-    </div>
+    </section>
 
-    <details class="card accordion hz-anchor" id="system-panel">
-      <summary>
-        <div class="hz-accordion-head">
-          <span>{{.T "system.timezoneTitle"}}</span>
-          <span class="muted small">{{.T "system.timezoneHint"}}</span>
-        </div>
-      </summary>
-      <div class="body">
-        <form method="post" action="/system/timezone" class="form">
-          <div class="field">
-            <label>{{.T "system.timezoneLabel"}}</label>
-            <input type="text" name="timeZone" value="{{.TimeZone}}" placeholder="{{.T "system.timezonePlaceholder"}}" />
-            <div class="hint">{{.T "system.timezoneHint2"}}</div>
+    <section class="panel" role="tabpanel" data-hz-panel="security" id="system-security" hidden>
+      <div class="callout warn">
+        <svg class="icon"><use href="#i-alert"/></svg>
+        <div class="callout-body">{{.T "system.masterKeyHint"}}</div>
+      </div>
+      <div class="grid cols-2">
+        <form class="card m0" method="post" action="/system/master-key/verify" data-hz-pjax>
+          <div class="card-head">
+            <div class="card-head-text">
+              <div class="card-title"><svg class="icon"><use href="#i-shield"/></svg>{{.T "system.masterKeyVerifyTitle"}}</div>
+              <div class="card-sub">{{.T "system.masterKeyVerifyHint"}}</div>
+            </div>
           </div>
-          <div class="btn-row">
-            <button class="btn primary" type="submit">{{.T "common.save"}}</button>
+          <div class="fields one">
+            <div class="field">
+              <label class="label" for="mk-v-cur">{{.T "system.masterKeyCurrent"}}</label>
+              <input id="mk-v-cur" type="password" name="currentMasterKey" autocomplete="off" placeholder="{{.T "system.masterKeyCurrentPlaceholder"}}" />
+            </div>
+            <div class="field">
+              <label class="label" for="mk-v-pw">{{.T "system.masterKeyPassword"}}</label>
+              <input id="mk-v-pw" type="password" name="password" autocomplete="current-password" placeholder="{{.T "system.masterKeyPasswordPlaceholder"}}" />
+            </div>
+          </div>
+          <div class="card-foot">
+            <button class="btn primary" type="submit"><svg class="icon"><use href="#i-shield"/></svg>{{.T "system.masterKeyVerify"}}</button>
+          </div>
+        </form>
+
+        <form class="card m0" method="post" action="/system/master-key" data-hz-pjax>
+          <div class="card-head">
+            <div class="card-head-text">
+              <div class="card-title"><svg class="icon"><use href="#i-key"/></svg>{{.T "system.masterKeyTitle"}}</div>
+            </div>
+          </div>
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="mk-r-cur">{{.T "system.masterKeyCurrent"}}</label>
+              <input id="mk-r-cur" type="password" name="currentMasterKey" autocomplete="off" placeholder="{{.T "system.masterKeyCurrentPlaceholder"}}" />
+            </div>
+            <div class="field">
+              <label class="label" for="mk-r-pw">{{.T "system.masterKeyPassword"}}</label>
+              <input id="mk-r-pw" type="password" name="password" autocomplete="current-password" placeholder="{{.T "system.masterKeyPasswordPlaceholder"}}" />
+            </div>
+            <div class="field">
+              <label class="label" for="mk-r-new">{{.T "system.masterKeyNew"}}</label>
+              <input id="mk-r-new" type="password" name="newMasterKey" autocomplete="new-password" placeholder="{{.T "system.masterKeyNewPlaceholder"}}" />
+            </div>
+            <div class="field">
+              <label class="label" for="mk-r-confirm">{{.T "system.masterKeyConfirm"}}</label>
+              <input id="mk-r-confirm" type="password" name="confirmNewMasterKey" autocomplete="new-password" placeholder="{{.T "system.masterKeyConfirmPlaceholder"}}" />
+            </div>
+          </div>
+          <div class="card-foot">
+            <button
+              class="btn danger"
+              type="submit"
+              data-confirm-submit="{{.T "system.masterKeyConfirmTitle"}}"
+              data-confirm-detail="{{.T "system.masterKeyConfirmDetail"}}"
+              data-confirm-ok="{{.T "system.masterKeyConfirmOk"}}"
+            ><svg class="icon"><use href="#i-refresh"/></svg>{{.T "system.masterKeyRotate"}}</button>
           </div>
         </form>
       </div>
-    </details>
+    </section>
 
-    <details class="card accordion hz-anchor" id="system-security">
-      <summary>
-        <div class="hz-accordion-head">
-          <span>{{.T "system.masterKeyTitle"}}</span>
-          <span class="muted small">{{.T "system.masterKeyHint"}}</span>
-        </div>
-      </summary>
-      <div class="body">
-        <div class="grid cols-2">
-          <div class="card">
-            <h3>{{.T "system.masterKeyVerifyTitle"}}</h3>
-            <div class="muted small">{{.T "system.masterKeyVerifyHint"}}</div>
-            <form method="post" action="/system/master-key/verify" class="form" style="margin-top:12px;">
-              <div class="grid cols-2">
-                <div class="field" style="margin:0">
-                  <label>{{.T "system.masterKeyCurrent"}}</label>
-                  <input type="password" name="currentMasterKey" autocomplete="off" placeholder="{{.T "system.masterKeyCurrentPlaceholder"}}" />
-                </div>
-                <div class="field" style="margin:0">
-                  <label>{{.T "system.masterKeyPassword"}}</label>
-                  <input type="password" name="password" autocomplete="current-password" placeholder="{{.T "system.masterKeyPasswordPlaceholder"}}" />
-                </div>
-              </div>
-              <div class="btn-row">
-                <button class="btn primary" type="submit">{{.T "system.masterKeyVerify"}}</button>
-              </div>
-            </form>
-          </div>
-
-          <div class="card">
-            <h3>{{.T "system.masterKeyTitle"}}</h3>
-            <div class="muted small">{{.T "system.masterKeyHint"}}</div>
-            <form method="post" action="/system/master-key" class="form" style="margin-top:12px;">
-              <div class="grid cols-2">
-                <div class="field" style="margin:0">
-                  <label>{{.T "system.masterKeyCurrent"}}</label>
-                  <input type="password" name="currentMasterKey" autocomplete="off" placeholder="{{.T "system.masterKeyCurrentPlaceholder"}}" />
-                </div>
-                <div class="field" style="margin:0">
-                  <label>{{.T "system.masterKeyPassword"}}</label>
-                  <input type="password" name="password" autocomplete="current-password" placeholder="{{.T "system.masterKeyPasswordPlaceholder"}}" />
-                </div>
-                <div class="field" style="margin:0">
-                  <label>{{.T "system.masterKeyNew"}}</label>
-                  <input type="password" name="newMasterKey" autocomplete="new-password" placeholder="{{.T "system.masterKeyNewPlaceholder"}}" />
-                </div>
-                <div class="field" style="margin:0">
-                  <label>{{.T "system.masterKeyConfirm"}}</label>
-                  <input type="password" name="confirmNewMasterKey" autocomplete="new-password" placeholder="{{.T "system.masterKeyConfirmPlaceholder"}}" />
-                </div>
-              </div>
-              <div class="btn-row">
-                <button
-                  class="btn danger"
-                  type="submit"
-                  data-confirm-submit="{{.T "system.masterKeyConfirmTitle"}}"
-                  data-confirm-detail="{{.T "system.masterKeyConfirmDetail"}}"
-                  data-confirm-ok="{{.T "system.masterKeyConfirmOk"}}"
-                >
-                  {{.T "system.masterKeyRotate"}}
-                </button>
-              </div>
-            </form>
+    <section class="panel" role="tabpanel" data-hz-panel="prefs" id="system-panel" hidden>
+      <form class="card narrow m0" method="post" action="/system/timezone" data-hz-pjax>
+        <div class="card-head">
+          <div class="card-head-text">
+            <div class="card-title"><svg class="icon"><use href="#i-clock"/></svg>{{.T "system.timezoneTitle"}}</div>
+            <div class="card-sub">{{.T "system.timezoneHint"}}</div>
           </div>
         </div>
-      </div>
-    </details>
-
-    <details class="card accordion hz-anchor" id="system-health">
-      <summary>
-        <div class="hz-accordion-head">
-          <span>{{.T "system.servicesTitle"}}</span>
-          <span class="muted small">{{.T "system.servicesHint"}}</span>
+        <div class="field">
+          <label class="label" for="sys-tz">{{.T "system.timezoneLabel"}}</label>
+          <input id="sys-tz" type="text" name="timeZone" value="{{.TimeZone}}" placeholder="{{.T "system.timezonePlaceholder"}}" />
+          <div class="hint">{{.T "system.timezoneHint2"}}</div>
         </div>
-      </summary>
-      <div class="body">
-        <div class="grid cols-2">
-          <div class="card" style="padding:14px;">
-            <h3 style="margin:0 0 6px;">Admin</h3>
-            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Admin}}</code></div>
-            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .AdminStatus)}}</div>
-            {{if and (eq .AdminStatus.Status "error") .AdminStatus.Error}}
-              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.AdminStatus.Error}}</div>
-            {{end}}
-          </div>
-
-          <div class="card" style="padding:14px;">
-            <h3 style="margin:0 0 6px;">Torcherino</h3>
-            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Torcherino}}</code></div>
-            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .TorcherinoStatus)}}</div>
-            {{if and (eq .TorcherinoStatus.Status "error") .TorcherinoStatus.Error}}
-              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.TorcherinoStatus.Error}}</div>
-            {{end}}
-          </div>
-
-          <div class="card" style="padding:14px;">
-            <h3 style="margin:0 0 6px;">{{.T "nav.cdnjs"}}</h3>
-            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Cdnjs}}</code></div>
-            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .CdnjsStatus)}}</div>
-            {{if and (eq .CdnjsStatus.Status "error") .CdnjsStatus.Error}}
-              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.CdnjsStatus.Error}}</div>
-            {{end}}
-          </div>
-
-          <div class="card" style="padding:14px;">
-            <h3 style="margin:0 0 6px;">GitHub Raw</h3>
-            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Git}}</code></div>
-            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .GitStatus)}}</div>
-            {{if and (eq .GitStatus.Status "error") .GitStatus.Error}}
-              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.GitStatus.Error}}</div>
-            {{end}}
-          </div>
-
-          <div class="card" style="padding:14px;">
-            <h3 style="margin:0 0 6px;">Sakuya</h3>
-            <div class="muted small">Oplist {{.T "common.port"}}：<code>{{.Ports.Sakuya}}</code></div>
-            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .SakuyaOplistStatus)}}</div>
-            {{if and (eq .SakuyaOplistStatus.Status "error") .SakuyaOplistStatus.Error}}
-              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.SakuyaOplistStatus.Error}}</div>
-            {{end}}
-          </div>
-
-          <div class="card" style="padding:14px;">
-            <h3 style="margin:0 0 6px;">{{.T "nav.patchouli"}}</h3>
-            <div class="muted small">{{.T "common.port"}}：<code>{{.Ports.Patchouli}}</code></div>
-            <div style="margin-top:8px;">{{template "serviceStatusPill" (statusCtx $ .PatchouliStatus)}}</div>
-            {{if and (eq .PatchouliStatus.Status "error") .PatchouliStatus.Error}}
-              <div class="muted small" style="margin-top:8px;">{{.T "common.errorPrefix"}}：{{.PatchouliStatus.Error}}</div>
-            {{end}}
-          </div>
+        <div class="card-foot">
+          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
         </div>
-      </div>
-    </details>
-
-    <details class="card accordion hz-anchor" id="system-redis">
-      <summary>
-        <div class="hz-accordion-head">
-          <span>{{.T "system.redisTitle"}}</span>
-          <span class="muted small">{{.T "system.redis.cacheManage"}}</span>
-        </div>
-        <div class="hz-accordion-status">
-          {{if eq .Redis.Status "ok"}}
-            <span class="pill ok">{{.T "redis.ok"}} · {{.Redis.LatencyMS}}ms</span>
-          {{else if eq .Redis.Status "error"}}
-            <span class="pill err">{{.T "redis.error"}}</span>
-          {{else}}
-            <span class="pill">{{.T "redis.notConfigured"}}</span>
-          {{end}}
-        </div>
-      </summary>
-      <div class="body">
-        {{if eq .Redis.Status "ok"}}
-          <div class="pill ok">{{.T "redis.ok"}} · {{.Redis.LatencyMS}}ms · <code>{{.Redis.Addr}}</code></div>
-          <div class="kvs" style="margin-top:12px;">
-            <div class="muted">{{.T "system.redis.version"}}</div>
-            <div>{{if .Redis.ServerVersion}}<code>{{.Redis.ServerVersion}}</code>{{else}}-{{end}}</div>
-            <div class="muted">{{.T "system.redis.uptime"}}</div>
-            <div>{{if gt .Redis.UptimeSeconds 0}}<code>{{.Redis.UptimeSeconds}}</code> {{.T "system.seconds"}}{{else}}-{{end}}</div>
-            <div class="muted">{{.T "system.redis.clients"}}</div>
-            <div>{{if gt .Redis.ConnectedClients 0}}<code>{{.Redis.ConnectedClients}}</code>{{else}}-{{end}}</div>
-            <div class="muted">{{.T "system.redis.usedMemory"}}</div>
-            <div>{{if .Redis.UsedMemoryHuman}}<code>{{.Redis.UsedMemoryHuman}}</code>{{else}}-{{end}}</div>
-            <div class="muted">{{.T "system.redis.dbSize"}}</div>
-            <div><code>{{.Redis.DBSize}}</code> {{.T "system.redis.keys"}}</div>
-          </div>
-          <div class="btn-row" style="margin-top:12px;">
-            <a class="btn" href="/system/redis-cache">{{.T "system.redis.cacheManage"}}</a>
-          </div>
-        {{else if eq .Redis.Status "error"}}
-          <div class="pill err">{{.T "redis.error"}} · <code>{{.Redis.Addr}}</code></div>
-          {{if .Redis.Error}}<div class="muted small" style="margin-top:10px;">{{.T "common.errorPrefix"}}：{{.Redis.Error}}</div>{{end}}
-        {{else}}
-          <div class="pill">{{.T "redis.notConfigured"}}</div>
-        {{end}}
-      </div>
-    </details>
+      </form>
+    </section>
   </div>
+{{end}}
+
+{{define "stat"}}
+  <div class="stat">
+    <div class="stat-label">{{.Label}}</div>
+    <div class="stat-value" data-hz-rewrite-field="{{.Field}}" title="{{.Value}}">{{if .Value}}{{.Value}}{{else}}-{{end}}</div>
+  </div>
+{{end}}
+
+{{define "rewritePanel"}}
+  <section data-hz-rewrite-panel="{{.Key}}" {{if .Hidden}}hidden{{end}}>
+    <div class="card-head">
+      <div class="card-head-text">
+        <div class="card-title">{{.Root.T (printf "system.rewriteRuntime.tab.%s" .Key)}}</div>
+        <div class="card-sub">{{.Hint}}</div>
+      </div>
+      <span class="pill {{if .S.Enabled}}ok{{else}}off{{end}}" data-hz-rewrite-enabled-pill="{{.Key}}" data-label-on="{{.Root.T "common.enabled"}}" data-label-off="{{.Root.T "common.disabled"}}">{{if .S.Enabled}}{{.Root.T "common.enabled"}}{{else}}{{.Root.T "common.disabled"}}{{end}}</span>
+    </div>
+    <div class="stats">
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.activeRewrites") "Field" (printf "%s.activeRewrites" .Key) "Value" .S.ActiveRewrites)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.reserve") "Field" (printf "%s.reserve" .Key) "Value" .S.Reserve)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.headroom") "Field" (printf "%s.headroom" .Key) "Value" .S.Headroom)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.bufferedLimit") "Field" (printf "%s.bufferedLimit" .Key) "Value" .S.BufferedLimit)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.streamChunk") "Field" (printf "%s.streamChunk" .Key) "Value" .S.StreamChunk)}}
+      {{template "stat" (dict "Label" (.Root.T "system.rewriteRuntime.unknownLength") "Field" (printf "%s.unknownLength" .Key) "Value" .S.UnknownLength)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.calibrationSamples") "Field" (printf "%s.calibrationSamples" .Key) "Value" .S.CalibrationSamples)}}
+      {{template "stat" (dict "Label" (.Root.T "system.rewriteRuntime.recentBodyP90") "Field" (printf "%s.recentBodyP90" .Key) "Value" .S.RecentBodyP90)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.bufferedCostFactor") "Field" (printf "%s.bufferedCostFactor" .Key) "Value" .S.BufferedCostFactor)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.usableShare") "Field" (printf "%s.usableShare" .Key) "Value" .S.UsableShare)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.bufferedSpeed") "Field" (printf "%s.bufferedSpeed" .Key) "Value" .S.BufferedSpeed)}}
+      {{template "stat" (dict "Label" (.Root.T "system.gitRewrite.streamSpeed") "Field" (printf "%s.streamSpeed" .Key) "Value" .S.StreamSpeed)}}
+    </div>
+  </section>
+{{end}}
+
+{{define "healthRow"}}
+  <li>
+    <span class="health-name">{{.Name}}</span>
+    <span class="health-port">:{{.Port}}</span>
+    {{template "serviceStatusPill" (statusCtx .Root .Status)}}
+    {{if and (eq .Status.Status "error") .Status.Error}}<span class="health-err">{{.Status.Error}}</span>{{end}}
+  </li>
 {{end}}

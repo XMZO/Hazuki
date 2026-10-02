@@ -1,300 +1,297 @@
 {{define "git"}}
-  <div class="grid">
-    <div class="card hz-anchor" id="git-overview">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "git.subtitle"}}</div>
-      <div class="btn-row">
-        <span class="pill">{{.T "git.currentInstance"}}：<code>{{if .CurrentInstanceID}}{{.CurrentInstanceID}}{{else}}default{{end}}</code> · {{.CurrentInstanceName}}</span>
-        <span class="pill">{{.T "common.serviceUrl"}}：<code>{{.GitBaseURL}}</code></span>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}}</h1>
+        <p class="page-desc">{{.T "git.subtitle"}}</p>
+      </div>
+      <div class="page-actions">
         {{if .GitStatus.Status}}{{template "serviceStatusPill" (statusCtx $ .GitStatus)}}{{end}}
-        <a class="btn" href="{{.GitHealthURL}}" target="_blank" rel="noreferrer">{{.T "common.openHealth"}}</a>
+        {{template "copyChip" (dict "Text" .GitBaseURL "Title" (.T "common.serviceUrl"))}}
+        <a class="btn sm" href="{{.GitHealthURL}}" target="_blank" rel="noreferrer"><svg class="icon"><use href="#i-pulse"/></svg>{{.T "common.health"}}</a>
       </div>
-      {{if and (eq .GitStatus.Status "error") .GitStatus.Error}}
-        <div class="muted small" style="margin-top:10px;">{{.T "common.healthErrorPrefix"}}：{{.GitStatus.Error}}</div>
-      {{end}}
-      <div class="btn-row hz-page-jump">
-        <a class="btn" href="#git-instances">{{.T "git.instancesTitle"}}</a>
-        <a class="btn" href="#git-basic">{{.T "common.basicConfig"}}</a>
-        <a class="btn" href="#git-auth">{{.T "git.authTitle"}}</a>
-        <a class="btn" href="#git-cache">{{.T "git.cachePolicyTitle"}}</a>
-        <a class="btn" href="#git-access">{{.T "git.accessControlTitle"}}</a>
-        <a class="btn" href="#git-rewrite">{{.T "git.replaceTitle"}}</a>
-        <a class="btn" href="#git-save">{{.T "common.save"}}</a>
-      </div>
-    </div>
+    </header>
 
-    <div class="card hz-anchor" id="git-instances">
-      <h3>{{.T "git.instancesTitle"}}</h3>
-      <div class="muted small">{{.T "git.instancesHint"}}</div>
-
-      <div class="table-wrap" style="margin-top:12px;">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>{{.T "common.name"}}</th>
-              <th>{{.T "common.id"}}</th>
-              <th>{{.T "common.port"}}</th>
-              <th>{{.T "common.status"}}</th>
-              <th>{{.T "common.actions"}}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Instances}}
-              <tr>
-                <td>{{.Name}}</td>
-                <td><code>{{.ID}}</code></td>
-                <td><code>{{.Port}}</code></td>
-                <td>{{template "serviceStatusPill" (statusCtx $ .Status)}}</td>
-                <td>
-                  <div class="btn-row" style="margin-top:0;">
-                    <a class="btn" href="{{if eq .ID "default"}}/config/git{{else}}/config/git?instance={{.ID}}{{end}}">{{$.T "common.edit"}}</a>
-                    <a class="btn" href="{{.BaseURL}}" target="_blank" rel="noreferrer">{{$.T "common.open"}}</a>
-                    <a class="btn" href="{{.HealthURL}}" target="_blank" rel="noreferrer">{{$.T "common.health"}}</a>
-                    {{if ne .ID "default"}}
-                      <form method="post" action="/config/git" style="margin:0; display:inline;" onsubmit="return confirm({{printf "%q" ($.T "git.confirmDeleteInstance" .ID)}})">
-                        <input type="hidden" name="action" value="deleteInstance" />
-                        <input type="hidden" name="instanceID" value="{{.ID}}" />
-                        <button class="btn danger" type="submit">{{$.T "common.delete"}}</button>
-                      </form>
-                    {{end}}
-                  </div>
-                </td>
-              </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-
-      <details class="accordion" style="margin-top:12px;">
-        <summary>{{.T "git.addInstanceTitle"}}</summary>
-        <div class="body">
-          <form class="form" method="post" action="/config/git">
-            <input type="hidden" name="action" value="addInstance" />
-            <div class="grid cols-2">
-              <div class="field">
-                <label>{{.T "git.instanceIDLabel"}}</label>
-                <input type="text" name="newInstanceID" value="" placeholder="{{.T "git.instanceIDPlaceholder"}}" required />
-                <div class="hint">{{.T "git.instanceIDHintPrefix"}} <code>default</code>{{.T "common.period"}}</div>
-              </div>
-              <div class="field">
-                <label>{{.T "git.instanceNameLabel"}} {{.T "common.optionalTag"}}</label>
-                <input type="text" name="newInstanceName" value="" placeholder="{{.T "git.instanceNamePlaceholder"}}" />
-              </div>
-            </div>
-            <div class="grid cols-2">
-              <div class="field">
-                <label>{{.T "common.port"}}</label>
-                <input type="text" name="newInstancePort" value="" placeholder="3003" required />
-                <div class="hint">{{.T "git.composeHint"}}</div>
-              </div>
-              <div class="field">
-                <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                  <input type="checkbox" name="newInstanceEnabled" checked />
-                  <input type="hidden" name="newInstanceEnabled" value="0" />
-                  {{.T "git.enableAfterCreate"}}
-                </label>
-                <div class="hint">{{.T "git.copyDefaultHint"}}</div>
-              </div>
-            </div>
-            <div class="btn-row">
-              <button class="btn primary" type="submit">{{.T "common.add"}}</button>
-            </div>
-          </form>
+    {{if gt (len .Instances) 1}}
+      <div class="toolbar">
+        <span class="muted small">{{.T "git.currentInstance"}}</span>
+        <div class="segmented" role="group" aria-label="{{.T "git.currentInstance"}}">
+          {{range .Instances}}
+            <a class="seg {{if or (eq .ID $.CurrentInstanceID) (and (eq .ID "default") (eq $.CurrentInstanceID ""))}}active{{end}}" href="{{if eq .ID "default"}}/config/git{{else}}/config/git?instance={{.ID}}{{end}}">{{.Name}} <span class="muted mono small">{{.ID}}</span></a>
+          {{end}}
         </div>
-      </details>
-    </div>
+      </div>
+    {{end}}
+    {{if and (eq .GitStatus.Status "error") .GitStatus.Error}}
+      <div class="callout err"><svg class="icon"><use href="#i-alert"/></svg><div class="callout-body">{{.T "common.healthErrorPrefix"}}：{{.GitStatus.Error}}</div></div>
+    {{end}}
 
-    <form class="form" method="post" action="/config/git">
+    <nav class="tabs" role="tablist" data-hz-tabs aria-label="{{.Title}}">
+      <button class="tab" type="button" role="tab" data-hz-tab="basic" aria-selected="true"><svg class="icon"><use href="#i-sliders"/></svg>{{.T "common.basicConfig"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="auth" aria-selected="false"><svg class="icon"><use href="#i-key"/></svg>{{.T "git.authTitle"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="cache" aria-selected="false"><svg class="icon"><use href="#i-clock"/></svg>{{.T "git.cachePolicyTitle"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="access" aria-selected="false"><svg class="icon"><use href="#i-filter"/></svg>{{.T "git.accessControlTitle"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="rewrite" aria-selected="false"><svg class="icon"><use href="#i-swap"/></svg>{{.T "git.replaceTitle"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="instances" aria-selected="false"><svg class="icon"><use href="#i-layers"/></svg>{{.T "git.instancesTitle"}} <span class="count">{{len .Instances}}</span></button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
+
+    <form class="tab-form" method="post" action="/config/git" data-hz-tabform data-hz-dirty data-hz-pjax>
       <input type="hidden" name="instanceID" value="{{.CurrentInstanceID}}" />
-      <div class="card hz-anchor" id="git-basic">
-        <h3>{{.T "common.basicConfig"}}</h3>
 
-        <div class="grid cols-2">
-          <div class="field">
-            <label>{{.T "common.port"}} <span class="key">{{.GitPortKey}}</span></label>
-            <input type="text" name="gitPort" value="{{.GitPortValue}}" placeholder="3002" />
-            <div class="hint">{{.T "git.portHint"}}</div>
-          </div>
-          <div class="field">
-            <label>{{.T "git.upstreamProtocolLabel"}} <span class="key">UPSTREAM_HTTPS</span></label>
-            <label class="hint" style="display:flex; gap:10px; align-items:center; font-weight:800;">
-              <input type="checkbox" name="upstreamHttps" {{if .Git.HTTPS}}checked{{end}} />
-              {{.T "git.useHttps"}}
-            </label>
-          </div>
-        </div>
-
-        <div class="field">
-          <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-            <input type="checkbox" name="serviceEnabled" {{if .GitEnabled}}checked{{end}} />
-            <input type="hidden" name="serviceEnabled" value="0" />
-            {{.T "common.enableService"}} <span class="key">git.disabled</span>
-          </label>
-          <div class="hint">{{.T "git.serviceToggleHint"}}</div>
-        </div>
-
-        <div class="field">
-          <label>{{.T "git.upstreamPathLabel"}} <span class="key">UPSTREAM_PATH</span></label>
-          <input type="text" name="upstreamPath" value="{{.Git.UpstreamPath}}" placeholder="{{.T "git.upstreamPathPlaceholder"}}" required />
-          <div class="hint">{{.T "git.upstreamPathHintPrefix"}} <code>/x.png</code> {{.T "git.upstreamPathHintMiddle"}} <code>UPSTREAM_PATH + /x.png</code>{{.T "common.semicolon"}}{{.T "git.upstreamPathHintSuffix"}} <code>/</code> {{.T "git.upstreamPathHintSuffix2"}}{{.T "common.period"}}</div>
-        </div>
-
-        <div class="grid cols-2">
-          <div class="field">
-            <label>{{.T "git.upstreamDesktopLabel"}} <span class="key">UPSTREAM</span></label>
-            <input type="text" name="upstream" value="{{.Git.Upstream}}" placeholder="raw.githubusercontent.com" />
-          </div>
-          <div class="field">
-            <label>{{.T "git.upstreamMobileLabel"}} <span class="key">UPSTREAM_MOBILE</span></label>
-            <input type="text" name="upstreamMobile" value="{{.Git.UpstreamMobile}}" placeholder="{{.Git.Upstream}}" />
-            <div class="hint">{{.T "git.upstreamMobileHint"}}</div>
-          </div>
-        </div>
-
-        <div class="field">
-          <label>{{.T "git.previewTitle"}} {{.T "common.previewNoRequest"}}</label>
-          <div class="hint">{{.T "git.previewHint"}}</div>
-          <div class="grid cols-2">
-            <input type="text" id="gitPreviewPath" value="/a.png" placeholder="/path/file.ext" />
-            <input type="text" id="gitPreviewUrl" value="" class="readonly" readonly />
-          </div>
-          <div class="hint" id="gitPreviewHint"></div>
-        </div>
-      </div>
-
-      <details class="card accordion hz-anchor" id="git-auth">
-        <summary>{{.T "git.authTitle"}} <span class="muted small">{{.T "git.githubTokenTag"}}</span></summary>
-        <div class="body">
-          <div class="field">
-            <label>GitHub Token <span class="key">GITHUB_TOKEN</span></label>
-            <input id="gitTokenInput" type="password" name="githubToken" value="" placeholder="{{if .TokenIsSet}}{{.T "secret.placeholderSetKeep"}}{{else}}{{.T "secret.placeholderNotSet"}}{{end}}" />
-            <div class="hint hint-line">
-              <span>{{.T "git.tokenHint"}}</span>
-              <span class="spacer"></span>
-              <label class="pill" style="font-weight:800;">
-                <input type="checkbox" data-toggle-password="#gitTokenInput" />
-                {{.T "common.show"}}
-              </label>
-              <label style="display:inline-flex; gap:8px; align-items:center; font-weight:800;">
-                <input type="checkbox" name="clearGithubToken" />
-                {{.T "common.clear"}}
-              </label>
+      <section class="panel" role="tabpanel" data-hz-panel="basic" id="git-basic">
+        <div class="card">
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="g-port">{{.T "common.port"}} <span class="key">{{.GitPortKey}}</span></label>
+              <input id="g-port" type="text" inputmode="numeric" name="gitPort" value="{{.GitPortValue}}" placeholder="3002" />
+              <div class="hint">{{.T "git.portHint"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="g-upath">{{.T "git.upstreamPathLabel"}} <span class="key">UPSTREAM_PATH</span></label>
+              <input id="g-upath" type="text" name="upstreamPath" value="{{.Git.UpstreamPath}}" placeholder="{{.T "git.upstreamPathPlaceholder"}}" required />
+              <div class="hint">{{.T "git.upstreamPathHintPrefix"}} <code>/x.png</code> {{.T "git.upstreamPathHintMiddle"}} <code>UPSTREAM_PATH + /x.png</code>{{.T "common.semicolon"}}{{.T "git.upstreamPathHintSuffix"}} <code>/</code> {{.T "git.upstreamPathHintSuffix2"}}{{.T "common.period"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="g-up">{{.T "git.upstreamDesktopLabel"}} <span class="key">UPSTREAM</span></label>
+              <input id="g-up" type="text" name="upstream" value="{{.Git.Upstream}}" placeholder="raw.githubusercontent.com" />
+            </div>
+            <div class="field">
+              <label class="label" for="g-upm">{{.T "git.upstreamMobileLabel"}} <span class="key">UPSTREAM_MOBILE</span></label>
+              <input id="g-upm" type="text" name="upstreamMobile" value="{{.Git.UpstreamMobile}}" placeholder="{{.Git.Upstream}}" />
+              <div class="hint">{{.T "git.upstreamMobileHint"}}</div>
             </div>
           </div>
-
-          <div class="field">
-            <label>{{.T "git.authSchemeLabel"}} <span class="key">GITHUB_AUTH_SCHEME</span></label>
-            <select name="githubAuthScheme">
-              <option value="token" {{if eq .AuthScheme "token"}}selected{{end}}>{{.T "git.authSchemeToken"}}</option>
-              <option value="Bearer" {{if eq .AuthScheme "Bearer"}}selected{{end}}>{{.T "git.authSchemeBearer"}}</option>
-            </select>
-            <div class="hint">{{.T "git.authSchemeHintPrefix"}} <code>token</code>{{.T "common.semicolon"}}{{.T "git.authSchemeHintSuffix"}} <code>Bearer</code>{{.T "common.period"}}</div>
+          <div class="switches">
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "common.enableService"}} <span class="key">git.disabled</span></span>
+                <span class="hint">{{.T "git.serviceToggleHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="serviceEnabled" {{if .GitEnabled}}checked{{end}} />
+              <input type="hidden" name="serviceEnabled" value="0" />
+            </label>
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "git.upstreamProtocolLabel"}} <span class="key">UPSTREAM_HTTPS</span></span>
+                <span class="hint">{{.T "git.useHttps"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="upstreamHttps" {{if .Git.HTTPS}}checked{{end}} />
+            </label>
           </div>
         </div>
-      </details>
-
-      <details class="card accordion hz-anchor" id="git-cache">
-        <summary>{{.T "git.cachePolicyTitle"}} <span class="muted small">（Cache-Control）</span></summary>
-        <div class="body">
-          <div class="field">
-            <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-              <input type="checkbox" name="disableCache" {{if .Git.DisableCache}}checked{{end}} />
-              {{.T "git.disableCacheLabel"}} <span class="key">DISABLE_CACHE</span>
-            </label>
-            <div class="hint">{{.T "git.disableCacheHintPrefix"}} <code>Cache-Control: no-store</code>{{.T "git.disableCacheHintSuffix"}}</div>
+        <div class="card">
+          <div class="card-head">
+            <div class="card-head-text">
+              <div class="card-title"><svg class="icon"><use href="#i-eye"/></svg>{{.T "git.previewTitle"}} <span class="muted small">{{.T "common.previewNoRequest"}}</span></div>
+              <div class="card-sub">{{.T "git.previewHint"}}</div>
+            </div>
           </div>
-
-          <div class="field">
-            <label>{{.T "git.cacheControlGlobalLabel"}} <span class="key">CACHE_CONTROL</span></label>
-            <input type="text" name="cacheControl" value="{{.Git.CacheControl}}" placeholder="{{.T "git.cacheControlGlobalPlaceholder"}}" />
-            <div class="hint">{{.T "git.cacheControlGlobalHint"}}</div>
+          <div class="pair">
+            <input type="text" id="gitPreviewPath" value="/a.png" placeholder="/path/file.ext" aria-label="path" />
+            <svg class="icon pair-arrow"><use href="#i-arrow-right"/></svg>
+            <input type="text" id="gitPreviewUrl" value="" readonly aria-label="url" />
           </div>
+          <div class="hint form-note" id="gitPreviewHint"></div>
+        </div>
+      </section>
 
-          <div class="grid cols-2">
+      <section class="panel" role="tabpanel" data-hz-panel="auth" id="git-auth" hidden>
+        <div class="card">
+          <div class="card-head"><div class="card-sub">{{.T "git.githubTokenTag"}}</div></div>
+          <div class="fields">
             <div class="field">
-              <label>{{.T "git.cacheControlMediaLabel"}} <span class="key">CACHE_CONTROL_MEDIA</span></label>
-              <input type="text" name="cacheControlMedia" value="{{.Git.CacheControlMedia}}" placeholder="public, max-age=43200000" />
+              <label class="label" for="gitTokenInput">GitHub Token <span class="key">GITHUB_TOKEN</span></label>
+              {{template "secretInput" (dict "Root" $ "ID" "gitTokenInput" "Name" "githubToken" "Placeholder" (or (and .TokenIsSet (.T "secret.placeholderSetKeep")) (.T "secret.placeholderNotSet")))}}
+              <div class="hint-row">
+                <span class="hint">{{.T "git.tokenHint"}}</span>
+                <label class="check"><input type="checkbox" name="clearGithubToken" />{{.T "common.clear"}}</label>
+              </div>
+            </div>
+            <div class="field">
+              <label class="label" for="g-scheme">{{.T "git.authSchemeLabel"}} <span class="key">GITHUB_AUTH_SCHEME</span></label>
+              <select id="g-scheme" name="githubAuthScheme">
+                <option value="token" {{if eq .AuthScheme "token"}}selected{{end}}>{{.T "git.authSchemeToken"}}</option>
+                <option value="Bearer" {{if eq .AuthScheme "Bearer"}}selected{{end}}>{{.T "git.authSchemeBearer"}}</option>
+              </select>
+              <div class="hint">{{.T "git.authSchemeHintPrefix"}} <code>token</code>{{.T "common.semicolon"}}{{.T "git.authSchemeHintSuffix"}} <code>Bearer</code>{{.T "common.period"}}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" role="tabpanel" data-hz-panel="cache" id="git-cache" hidden>
+        <div class="card">
+          <div class="switches one">
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "git.disableCacheLabel"}} <span class="key">DISABLE_CACHE</span></span>
+                <span class="hint">{{.T "git.disableCacheHintPrefix"}} <code>Cache-Control: no-store</code>{{.T "git.disableCacheHintSuffix"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="disableCache" {{if .Git.DisableCache}}checked{{end}} />
+            </label>
+          </div>
+          <div class="fields">
+            <div class="field full">
+              <label class="label" for="g-cc">{{.T "git.cacheControlGlobalLabel"}} <span class="key">CACHE_CONTROL</span></label>
+              <input id="g-cc" type="text" name="cacheControl" value="{{.Git.CacheControl}}" placeholder="{{.T "git.cacheControlGlobalPlaceholder"}}" />
+              <div class="hint">{{.T "git.cacheControlGlobalHint"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="g-ccm">{{.T "git.cacheControlMediaLabel"}} <span class="key">CACHE_CONTROL_MEDIA</span></label>
+              <input id="g-ccm" type="text" name="cacheControlMedia" value="{{.Git.CacheControlMedia}}" placeholder="public, max-age=43200000" />
               <div class="hint">{{.T "git.cacheControlMediaHint"}}</div>
             </div>
             <div class="field">
-              <label>{{.T "git.cacheControlTextLabel"}} <span class="key">CACHE_CONTROL_TEXT</span></label>
-              <input type="text" name="cacheControlText" value="{{.Git.CacheControlText}}" placeholder="public, max-age=60" />
+              <label class="label" for="g-cct">{{.T "git.cacheControlTextLabel"}} <span class="key">CACHE_CONTROL_TEXT</span></label>
+              <input id="g-cct" type="text" name="cacheControlText" value="{{.Git.CacheControlText}}" placeholder="public, max-age=60" />
               <div class="hint">{{.T "git.cacheControlTextHint"}}</div>
             </div>
           </div>
-
-          <div class="muted small">{{.T "git.cacheControlLogicPrefix"}} <code>application/octet-stream</code> {{.T "git.cacheControlLogicSuffix"}}</div>
+          <p class="hint form-note">{{.T "git.cacheControlLogicPrefix"}} <code>application/octet-stream</code> {{.T "git.cacheControlLogicSuffix"}}</p>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="git-cors">
-        <summary>CORS</summary>
-        <div class="body">
-          <div class="field">
-            <label>{{.T "git.corsOriginLabel"}} <span class="key">CORS_ORIGIN</span></label>
-            <input type="text" name="corsOrigin" value="{{.Git.CorsOrigin}}" placeholder="{{.T "git.corsOriginPlaceholder"}}" />
-            <div class="hint">{{.T "git.corsOriginHintPrefix"}} <code>*</code>{{.T "common.period"}}</div>
-          </div>
-          <div class="field">
-            <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-              <input type="checkbox" name="corsAllowCredentials" {{if .Git.CorsAllowCredentials}}checked{{end}} />
-              {{.T "git.corsAllowCredentialsLabel"}} <span class="key">CORS_ALLOW_CREDENTIALS</span>
-            </label>
-            <div class="hint">{{.T "git.corsAllowCredentialsHintPrefix"}} <code>*</code>{{.T "git.corsAllowCredentialsHintSuffix"}}</div>
-          </div>
-          <div class="field">
-            <label>{{.T "git.corsExposeHeadersLabel"}} <span class="key">CORS_EXPOSE_HEADERS</span></label>
-            <input type="text" name="corsExposeHeaders" value="{{.Git.CorsExposeHeaders}}" placeholder="Accept-Ranges, Content-Length, ..." />
-            <div class="hint">{{.T "git.corsExposeHeadersHint"}}</div>
-          </div>
-        </div>
-      </details>
-
-      <details class="card accordion hz-anchor" id="git-access">
-        <summary>{{.T "git.accessControlTitle"}}</summary>
-        <div class="body">
-          <div class="grid cols-2">
+      <section class="panel" role="tabpanel" data-hz-panel="access" id="git-access" hidden>
+        <div class="card" id="git-cors">
+          <div class="card-head"><div class="card-title"><svg class="icon"><use href="#i-globe"/></svg>CORS</div></div>
+          <div class="fields">
             <div class="field">
-              <label>{{.T "git.blockedRegionsLabel"}} <span class="key">BLOCKED_REGION</span></label>
-              <input type="text" name="blockedRegions" value="{{.BlockedRegionsCsv}}" placeholder="CN,HK" />
+              <label class="label" for="g-corso">{{.T "git.corsOriginLabel"}} <span class="key">CORS_ORIGIN</span></label>
+              <input id="g-corso" type="text" name="corsOrigin" value="{{.Git.CorsOrigin}}" placeholder="{{.T "git.corsOriginPlaceholder"}}" />
+              <div class="hint">{{.T "git.corsOriginHintPrefix"}} <code>*</code>{{.T "common.period"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="g-corse">{{.T "git.corsExposeHeadersLabel"}} <span class="key">CORS_EXPOSE_HEADERS</span></label>
+              <input id="g-corse" type="text" name="corsExposeHeaders" value="{{.Git.CorsExposeHeaders}}" placeholder="Accept-Ranges, Content-Length, ..." />
+              <div class="hint">{{.T "git.corsExposeHeadersHint"}}</div>
+            </div>
+          </div>
+          <div class="switches one">
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "git.corsAllowCredentialsLabel"}} <span class="key">CORS_ALLOW_CREDENTIALS</span></span>
+                <span class="hint">{{.T "git.corsAllowCredentialsHintPrefix"}} <code>*</code>{{.T "git.corsAllowCredentialsHintSuffix"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="corsAllowCredentials" {{if .Git.CorsAllowCredentials}}checked{{end}} />
+            </label>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title"><svg class="icon"><use href="#i-shield"/></svg>{{.T "git.accessControlTitle"}}</div></div>
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="g-regions">{{.T "git.blockedRegionsLabel"}} <span class="key">BLOCKED_REGION</span></label>
+              <input id="g-regions" type="text" name="blockedRegions" value="{{.BlockedRegionsCsv}}" placeholder="CN,HK" />
               <div class="hint">{{.T "git.blockedRegionsHintPrefix"}} <code>CF-IPCountry</code>{{.T "common.semicolon"}}{{.T "git.blockedRegionsHintSuffix"}}{{.T "common.period"}}</div>
             </div>
             <div class="field">
-              <label>{{.T "git.blockedIPsLabel"}} <span class="key">BLOCKED_IP_ADDRESS</span></label>
-              <input type="text" name="blockedIpAddresses" value="{{.BlockedIPsCsv}}" placeholder="0.0.0.0,127.0.0.1" />
+              <label class="label" for="g-ips">{{.T "git.blockedIPsLabel"}} <span class="key">BLOCKED_IP_ADDRESS</span></label>
+              <input id="g-ips" type="text" name="blockedIpAddresses" value="{{.BlockedIPsCsv}}" placeholder="0.0.0.0,127.0.0.1" />
               <div class="hint">{{.T "git.blockedIPsHint"}}</div>
             </div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="git-rewrite">
-        <summary>{{.T "git.replaceTitle"}}</summary>
-        <div class="body">
+      <section class="panel" role="tabpanel" data-hz-panel="rewrite" id="git-rewrite" hidden>
+        <div class="card">
           <div class="field">
-            <label>REPLACE_DICT JSON <span class="key">REPLACE_DICT</span></label>
-            <textarea id="gitReplaceDictJson" name="replaceDictJson" data-json>{{.ReplaceDictJson}}</textarea>
-            <div class="hint hint-line">
-              <span>{{.T "git.replacePlaceholderPrefix"}} <code>$upstream</code> / <code>$custom_domain</code>{{.T "common.period"}}</span>
-              <span class="spacer"></span>
-              <button class="btn" type="button" data-format-json="#gitReplaceDictJson">{{.T "common.formatJson"}}</button>
+            <label class="label" for="gitReplaceDictJson">REPLACE_DICT JSON <span class="key">REPLACE_DICT</span></label>
+            <textarea id="gitReplaceDictJson" name="replaceDictJson" data-json spellcheck="false">{{.ReplaceDictJson}}</textarea>
+            <div class="hint-row">
+              <span class="hint">{{.T "git.replacePlaceholderPrefix"}} <code>$upstream</code> / <code>$custom_domain</code>{{.T "common.period"}} {{.T "git.replaceHint"}}</span>
               <span class="json-msg" aria-live="polite"></span>
+              <button class="btn sm" type="button" data-format-json="#gitReplaceDictJson">{{.T "common.formatJson"}}</button>
             </div>
-            <div class="hint">{{.T "git.replaceHint"}}</div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <div class="card hz-anchor" id="git-save">
-        <h3>{{.T "common.save"}}</h3>
-        <div class="field">
-          <label>{{.T "common.noteOptional"}}</label>
-          <input type="text" name="note" value="" placeholder="{{.T "git.notePlaceholder"}}" />
+      {{template "savebar" (dict "Root" $ "Note" true)}}
+    </form>
+
+    <section class="panel" role="tabpanel" data-hz-panel="instances" id="git-instances" hidden>
+      <div class="card flush">
+        <div class="card-head">
+          <div class="card-head-text">
+            <div class="card-title"><svg class="icon"><use href="#i-layers"/></svg>{{.T "git.instancesTitle"}}</div>
+            <div class="card-sub">{{.T "git.instancesHint"}}</div>
+          </div>
         </div>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
+        <div class="table-wrap">
+          <table class="table stack">
+            <thead>
+              <tr>
+                <th>{{.T "common.name"}}</th>
+                <th>{{.T "common.id"}}</th>
+                <th>{{.T "common.port"}}</th>
+                <th>{{.T "common.status"}}</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Instances}}
+                <tr>
+                  <td class="cell-main">{{.Name}}</td>
+                  <td data-label="{{$.T "common.id"}}"><code>{{.ID}}</code></td>
+                  <td data-label="{{$.T "common.port"}}"><code>{{.Port}}</code></td>
+                  <td data-label="{{$.T "common.status"}}">{{template "serviceStatusPill" (statusCtx $ .Status)}}</td>
+                  <td class="actions">
+                    <div class="btn-row">
+                      <a class="btn sm" href="{{if eq .ID "default"}}/config/git{{else}}/config/git?instance={{.ID}}{{end}}"><svg class="icon"><use href="#i-sliders"/></svg>{{$.T "common.edit"}}</a>
+                      <a class="btn sm square" href="{{.BaseURL}}" target="_blank" rel="noreferrer" title="{{$.T "common.open"}}" aria-label="{{$.T "common.open"}}"><svg class="icon"><use href="#i-external"/></svg></a>
+                      <a class="btn sm square" href="{{.HealthURL}}" target="_blank" rel="noreferrer" title="{{$.T "common.health"}}" aria-label="{{$.T "common.health"}}"><svg class="icon"><use href="#i-pulse"/></svg></a>
+                      {{if ne .ID "default"}}
+                        <form method="post" action="/config/git" class="m0" data-hz-pjax>
+                          <input type="hidden" name="action" value="deleteInstance" />
+                          <input type="hidden" name="instanceID" value="{{.ID}}" />
+                          <button class="btn sm square danger-ghost" type="submit" title="{{$.T "common.delete"}}" aria-label="{{$.T "common.delete"}}" data-confirm-submit="{{$.T "git.confirmDeleteInstance" .ID}}" data-confirm-ok="{{$.T "common.delete"}}"><svg class="icon"><use href="#i-trash"/></svg></button>
+                        </form>
+                      {{end}}
+                    </div>
+                  </td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
         </div>
       </div>
-    </form>
+
+      <form class="card m0" method="post" action="/config/git" data-hz-pjax>
+        <input type="hidden" name="action" value="addInstance" />
+        <div class="card-head"><div class="card-title"><svg class="icon"><use href="#i-plus"/></svg>{{.T "git.addInstanceTitle"}}</div></div>
+        <div class="fields">
+          <div class="field">
+            <label class="label" for="g-new-id">{{.T "git.instanceIDLabel"}}</label>
+            <input id="g-new-id" type="text" name="newInstanceID" value="" placeholder="{{.T "git.instanceIDPlaceholder"}}" required />
+            <div class="hint">{{.T "git.instanceIDHintPrefix"}} <code>default</code>{{.T "common.period"}}</div>
+          </div>
+          <div class="field">
+            <label class="label" for="g-new-name">{{.T "git.instanceNameLabel"}} <span class="opt">{{.T "common.optionalTag"}}</span></label>
+            <input id="g-new-name" type="text" name="newInstanceName" value="" placeholder="{{.T "git.instanceNamePlaceholder"}}" />
+          </div>
+          <div class="field">
+            <label class="label" for="g-new-port">{{.T "common.port"}}</label>
+            <input id="g-new-port" type="text" inputmode="numeric" name="newInstancePort" value="" placeholder="3003" required />
+            <div class="hint">{{.T "git.composeHint"}}</div>
+          </div>
+          <div class="field">
+            <span class="label">&nbsp;</span>
+            <label class="switch-row">
+              <span class="switch-text">
+                <span class="switch-title">{{.T "git.enableAfterCreate"}}</span>
+                <span class="hint">{{.T "git.copyDefaultHint"}}</span>
+              </span>
+              <input class="switch" type="checkbox" name="newInstanceEnabled" checked />
+              <input type="hidden" name="newInstanceEnabled" value="0" />
+            </label>
+          </div>
+        </div>
+        <div class="card-foot">
+          <button class="btn primary" type="submit"><svg class="icon"><use href="#i-plus"/></svg>{{.T "common.add"}}</button>
+        </div>
+      </form>
+    </section>
   </div>
 {{end}}

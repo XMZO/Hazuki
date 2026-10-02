@@ -1,26 +1,33 @@
 {{define "account"}}
-  <div class="grid">
-    <div class="card">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "account.currentUser"}}：<code>{{.User.Username}}</code>{{.T "account.currentUserSuffix"}}</div>
-    </div>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}}</h1>
+        <p class="page-desc">{{.T "account.currentUser"}}：<code>{{.User.Username}}</code>{{.T "account.currentUserSuffix"}}</p>
+      </div>
+    </header>
 
-    <div class="card">
-      <h3>{{.T "account.changePassword"}}</h3>
-      <div class="muted small">{{.T "account.passwordMinLength"}}</div>
-      <form method="post" action="/account/password" class="form" style="margin-top:12px;">
+    <form class="card narrow m0" method="post" action="/account/password" data-hz-pjax>
+      <div class="card-head">
+        <div class="card-head-text">
+          <div class="card-title"><svg class="icon"><use href="#i-lock"/></svg>{{.T "account.changePassword"}}</div>
+          <div class="card-sub">{{.T "account.passwordMinLength"}}</div>
+        </div>
+      </div>
+      <input type="text" name="username" value="{{.User.Username}}" autocomplete="username" hidden />
+      <div class="fields one">
         <div class="field">
-          <label>{{.T "account.currentPassword"}}</label>
-          <input type="password" name="currentPassword" autocomplete="current-password" required />
+          <label class="label" for="acc-cur">{{.T "account.currentPassword"}}</label>
+          <input id="acc-cur" type="password" name="currentPassword" autocomplete="current-password" required />
         </div>
         <div class="field">
-          <label>{{.T "account.newPassword"}}</label>
-          <input type="password" name="newPassword" autocomplete="new-password" required />
+          <label class="label" for="acc-new">{{.T "account.newPassword"}}</label>
+          <input id="acc-new" type="password" name="newPassword" autocomplete="new-password" minlength="8" required />
         </div>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "common.save"}}</button>
-        </div>
-      </form>
-    </div>
+      </div>
+      <div class="card-foot">
+        <button class="btn primary" type="submit">{{.T "common.save"}}</button>
+      </div>
+    </form>
   </div>
 {{end}}

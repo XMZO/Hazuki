@@ -1,156 +1,126 @@
 {{define "wizard"}}
-  <div class="grid">
-    <div class="card hz-anchor" id="wizard-overview">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "wizard.subtitle"}}</div>
-      <div class="btn-row hz-page-jump">
-        <a class="btn" href="#wizard-torcherino">Torcherino</a>
-        <a class="btn" href="#wizard-cdnjs">{{.T "nav.cdnjs"}}</a>
-        <a class="btn" href="#wizard-git">{{.T "nav.git"}}</a>
-        <a class="btn" href="#wizard-save">{{.T "common.save"}}</a>
+  <div class="page">
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1 class="page-title">{{.Title}}</h1>
+        <p class="page-desc">{{.T "wizard.subtitle"}}</p>
       </div>
-    </div>
+    </header>
 
-    <form class="form" method="post" action="/wizard">
-      <details class="card accordion hz-anchor" id="wizard-torcherino">
-        <summary>Torcherino <span class="muted small">{{.T "torcherino.tagline"}}</span></summary>
-        <div class="body">
-          <div class="field">
-            <label>{{.T "torcherino.defaultTargetLabel"}} <span class="key">DEFAULT_TARGET</span></label>
-            <input type="text" name="torcherinoDefaultTarget" value="{{.TorcherinoDefaultTarget}}" placeholder="example.pages.dev" />
-            <div class="hint">{{.T "torcherino.needDefaultOrMap"}}</div>
-          </div>
-          <div class="field">
-            <label>{{.T "torcherino.hostMappingJsonLabel"}} <span class="key">HOST_MAPPING</span></label>
-            <textarea id="wizardTorcherinoHostMappingJson" name="torcherinoHostMappingJson" data-json placeholder="{&quot;a.com&quot;:&quot;xxx.pages.dev&quot;}">{{.TorcherinoHostMappingJSON}}</textarea>
-            <div class="hint hint-line">
-              <span>{{.T "torcherino.hostMappingHintShort"}}</span>
-              <span class="spacer"></span>
-              <button class="btn" type="button" data-format-json="#wizardTorcherinoHostMappingJson">{{.T "common.formatJson"}}</button>
-              <span class="json-msg" aria-live="polite"></span>
+    <nav class="tabs" role="tablist" data-hz-tabs aria-label="{{.Title}}">
+      <button class="tab" type="button" role="tab" data-hz-tab="torcherino" aria-selected="true"><span class="step">1</span>Torcherino</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="cdnjs" aria-selected="false"><span class="step">2</span>{{.T "nav.cdnjs"}}</button>
+      <button class="tab" type="button" role="tab" data-hz-tab="git" aria-selected="false"><span class="step">3</span>{{.T "nav.git"}}</button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
+
+    <form class="tab-form" method="post" action="/wizard" data-hz-tabform data-hz-dirty data-hz-pjax>
+      <section class="panel" role="tabpanel" data-hz-panel="torcherino" id="wizard-torcherino">
+        <div class="card">
+          <div class="card-head"><div class="card-sub">{{.T "torcherino.tagline"}}</div></div>
+          <div class="fields">
+            <div class="field full">
+              <label class="label" for="w-target">{{.T "torcherino.defaultTargetLabel"}} <span class="key">DEFAULT_TARGET</span></label>
+              <input id="w-target" type="text" name="torcherinoDefaultTarget" value="{{.TorcherinoDefaultTarget}}" placeholder="example.pages.dev" />
+              <div class="hint">{{.T "torcherino.needDefaultOrMap"}}</div>
             </div>
-          </div>
-
-          <div class="grid cols-2">
+            <div class="field full">
+              <label class="label" for="wizardTorcherinoHostMappingJson">{{.T "torcherino.hostMappingJsonLabel"}} <span class="key">HOST_MAPPING</span></label>
+              <textarea id="wizardTorcherinoHostMappingJson" name="torcherinoHostMappingJson" data-json spellcheck="false" placeholder="{&quot;a.com&quot;:&quot;xxx.pages.dev&quot;}">{{.TorcherinoHostMappingJSON}}</textarea>
+              <div class="hint-row">
+                <span class="hint">{{.T "torcherino.hostMappingHintShort"}}</span>
+                <span class="json-msg" aria-live="polite"></span>
+                <button class="btn sm" type="button" data-format-json="#wizardTorcherinoHostMappingJson">{{.T "common.formatJson"}}</button>
+              </div>
+            </div>
             <div class="field">
-              <label>WORKER_SECRET_HEADERS <span class="key">WORKER_SECRET_HEADERS</span></label>
-              <input type="text" name="torcherinoWorkerSecretHeaders" value="{{.TorcherinoWorkerSecretHeaders}}" placeholder="x-forwarded-by-worker" />
+              <label class="label" for="w-wsh">WORKER_SECRET_HEADERS</label>
+              <input id="w-wsh" type="text" name="torcherinoWorkerSecretHeaders" value="{{.TorcherinoWorkerSecretHeaders}}" placeholder="x-forwarded-by-worker" />
               <div class="hint">{{.T "torcherino.workerSecretHeadersHint"}} <code>x-forwarded-by-worker</code>{{.T "common.period"}}</div>
             </div>
             <div class="field">
-              <label>WORKER_SECRET_KEY <span class="key">WORKER_SECRET_KEY</span></label>
-              <input id="wizardWorkerSecretKey" type="password" name="torcherinoWorkerSecretKey" value="" placeholder="{{if .SecretIsSet}}{{.T "secret.placeholderSetKeep"}}{{else}}{{.T "secret.placeholderEmptyDisable"}}{{end}}" />
-              <div class="hint hint-line">
-                <span class="spacer"></span>
-                <label class="pill" style="font-weight:800;">
-                  <input type="checkbox" data-toggle-password="#wizardWorkerSecretKey" />
-                  {{.T "common.show"}}
-                </label>
-                <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                  <input type="checkbox" name="torcherinoClearWorkerSecretKey" />
-                  {{.T "common.clear"}}
-                </label>
+              <label class="label" for="wizardWorkerSecretKey">WORKER_SECRET_KEY</label>
+              {{template "secretInput" (dict "Root" $ "ID" "wizardWorkerSecretKey" "Name" "torcherinoWorkerSecretKey" "Placeholder" (or (and .SecretIsSet (.T "secret.placeholderSetKeep")) (.T "secret.placeholderEmptyDisable")))}}
+              <div class="hint-row">
+                <span class="hint"></span>
+                <label class="check"><input type="checkbox" name="torcherinoClearWorkerSecretKey" />{{.T "common.clear"}}</label>
+              </div>
+            </div>
+            <div class="field full">
+              <label class="label" for="wizardWorkerSecretHeaderMapJson">{{.T "torcherino.workerSecretHeaderMapLabel"}} <span class="key">WORKER_SECRET_HEADER_MAP</span></label>
+              <textarea id="wizardWorkerSecretHeaderMapJson" name="torcherinoWorkerSecretHeaderMapJson" data-json spellcheck="false">{{.TorcherinoWorkerSecretHeaderMap}}</textarea>
+              <div class="hint-row">
+                <span class="hint"><code>__SET__</code> {{.T "torcherino.setPlaceholderHint"}}</span>
+                <span class="json-msg" aria-live="polite"></span>
+                <label class="check"><input type="checkbox" name="torcherinoClearWorkerSecretHeaderMap" />{{.T "common.clearHeaderMap"}}</label>
+                <button class="btn sm" type="button" data-format-json="#wizardWorkerSecretHeaderMapJson">{{.T "common.formatJson"}}</button>
               </div>
             </div>
           </div>
-
-          <div class="field">
-            <label>{{.T "torcherino.workerSecretHeaderMapLabel"}} <span class="key">WORKER_SECRET_HEADER_MAP</span></label>
-            <textarea id="wizardWorkerSecretHeaderMapJson" name="torcherinoWorkerSecretHeaderMapJson" data-json>{{.TorcherinoWorkerSecretHeaderMap}}</textarea>
-            <div class="hint hint-line">
-              <span><code>__SET__</code> {{.T "torcherino.setPlaceholderHint"}}</span>
-              <span class="spacer"></span>
-              <button class="btn" type="button" data-format-json="#wizardWorkerSecretHeaderMapJson">{{.T "common.formatJson"}}</button>
-              <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                <input type="checkbox" name="torcherinoClearWorkerSecretHeaderMap" />
-                {{.T "common.clearHeaderMap"}}
-              </label>
-              <span class="json-msg" aria-live="polite"></span>
-            </div>
-          </div>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="wizard-cdnjs">
-        <summary>{{.T "nav.cdnjs"}} <span class="muted small">{{.T "cdnjs.tagline"}}</span></summary>
-        <div class="body">
-          <div class="grid cols-2">
+      <section class="panel" role="tabpanel" data-hz-panel="cdnjs" id="wizard-cdnjs" hidden>
+        <div class="card">
+          <div class="card-head"><div class="card-sub">{{.T "cdnjs.tagline"}}</div></div>
+          <div class="fields">
             <div class="field">
-              <label>DEFAULT_GH_USER <span class="key">DEFAULT_GH_USER</span></label>
-              <input type="text" name="cdnjsDefaultGhUser" value="{{.CdnjsDefaultGhUser}}" placeholder="XMZO" />
+              <label class="label" for="w-defuser">DEFAULT_GH_USER</label>
+              <input id="w-defuser" type="text" name="cdnjsDefaultGhUser" value="{{.CdnjsDefaultGhUser}}" placeholder="XMZO" />
             </div>
             <div class="field">
-              <label>GH_USER_POLICY <span class="key">GH_USER_POLICY</span></label>
-              <select name="cdnjsGhUserPolicy">
+              <label class="label" for="w-policy">GH_USER_POLICY</label>
+              <select id="w-policy" name="cdnjsGhUserPolicy">
                 <option value="allowlist" {{if or (eq .CdnjsGhUserPolicy "") (eq .CdnjsGhUserPolicy "allowlist")}}selected{{end}}>{{.T "cdnjs.policy.allowlist"}}</option>
                 <option value="denylist" {{if eq .CdnjsGhUserPolicy "denylist"}}selected{{end}}>{{.T "cdnjs.policy.denylist"}}</option>
               </select>
             </div>
-          </div>
-
-          <div class="grid cols-2" style="margin-top:10px;">
             <div class="field">
-              <label>ALLOWED_GH_USERS <span class="key">ALLOWED_GH_USERS</span></label>
-              <input type="text" name="cdnjsAllowedGhUsers" value="{{.CdnjsAllowedGhUsers}}" placeholder="XMZO,starsei" />
+              <label class="label" for="w-allowed">ALLOWED_GH_USERS</label>
+              <input id="w-allowed" type="text" name="cdnjsAllowedGhUsers" value="{{.CdnjsAllowedGhUsers}}" placeholder="XMZO,starsei" />
               <div class="hint">{{.T "cdnjs.allowedUsersHint"}}</div>
             </div>
             <div class="field">
-              <label>BLOCKED_GH_USERS <span class="key">BLOCKED_GH_USERS</span></label>
-              <input type="text" name="cdnjsBlockedGhUsers" value="{{.CdnjsBlockedGhUsers}}" placeholder="baduser1,baduser2" />
+              <label class="label" for="w-blocked">BLOCKED_GH_USERS</label>
+              <input id="w-blocked" type="text" name="cdnjsBlockedGhUsers" value="{{.CdnjsBlockedGhUsers}}" placeholder="baduser1,baduser2" />
               <div class="hint">{{.T "cdnjs.blockedUsersHint"}}</div>
             </div>
-          </div>
-
-          <div class="grid cols-2" style="margin-top:10px;">
             <div class="field">
-              <label>ASSET_URL <span class="key">ASSET_URL</span></label>
-              <input type="text" name="cdnjsAssetUrl" value="{{.CdnjsAssetURL}}" placeholder="https://cdn.jsdelivr.net" />
+              <label class="label" for="w-asset">ASSET_URL</label>
+              <input id="w-asset" type="text" name="cdnjsAssetUrl" value="{{.CdnjsAssetURL}}" placeholder="https://cdn.jsdelivr.net" />
             </div>
             <div class="field">
-              <label>REDIS_HOST / REDIS_PORT</label>
-              <div class="grid cols-2">
-                <input type="text" name="cdnjsRedisHost" value="{{.CdnjsRedisHost}}" placeholder="redis" />
-                <input type="text" name="cdnjsRedisPort" value="{{.CdnjsRedisPort}}" placeholder="6379" />
+              <label class="label" for="w-rhost">REDIS_HOST / REDIS_PORT</label>
+              <div class="pair" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr)">
+                <input id="w-rhost" type="text" name="cdnjsRedisHost" value="{{.CdnjsRedisHost}}" placeholder="redis" />
+                <input type="text" inputmode="numeric" name="cdnjsRedisPort" value="{{.CdnjsRedisPort}}" placeholder="6379" aria-label="REDIS_PORT" />
               </div>
             </div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <details class="card accordion hz-anchor" id="wizard-git">
-        <summary>{{.T "nav.git"}}</summary>
-        <div class="body">
-          <div class="field">
-            <label>UPSTREAM_PATH <span class="key">UPSTREAM_PATH</span></label>
-            <input type="text" name="gitUpstreamPath" value="{{.GitUpstreamPath}}" placeholder="/owner/repo/branch" />
-            <div class="hint">{{.T "git.upstreamPathHint"}} <code>/owner/repo/branch</code>{{.T "common.period"}}</div>
-          </div>
-
-          <div class="field">
-            <label>GITHUB_TOKEN <span class="key">GITHUB_TOKEN</span></label>
-            <input id="wizardGitToken" type="password" name="gitGithubToken" value="" placeholder="{{if .TokenIsSet}}{{.T "secret.placeholderSetKeep"}}{{else}}{{.T "secret.placeholderEmptyNoToken"}}{{end}}" />
-            <div class="hint hint-line">
-              <span class="spacer"></span>
-              <label class="pill" style="font-weight:800;">
-                <input type="checkbox" data-toggle-password="#wizardGitToken" />
-                {{.T "common.show"}}
-              </label>
-              <label style="display:flex; gap:10px; align-items:center; font-weight:900;">
-                <input type="checkbox" name="gitClearGithubToken" />
-                {{.T "git.clearToken"}}
-              </label>
+      <section class="panel" role="tabpanel" data-hz-panel="git" id="wizard-git" hidden>
+        <div class="card">
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="w-upath">UPSTREAM_PATH</label>
+              <input id="w-upath" type="text" name="gitUpstreamPath" value="{{.GitUpstreamPath}}" placeholder="/owner/repo/branch" />
+              <div class="hint">{{.T "git.upstreamPathHint"}} <code>/owner/repo/branch</code>{{.T "common.period"}}</div>
+            </div>
+            <div class="field">
+              <label class="label" for="wizardGitToken">GITHUB_TOKEN</label>
+              {{template "secretInput" (dict "Root" $ "ID" "wizardGitToken" "Name" "gitGithubToken" "Placeholder" (or (and .TokenIsSet (.T "secret.placeholderSetKeep")) (.T "secret.placeholderEmptyNoToken")))}}
+              <div class="hint-row">
+                <span class="hint"></span>
+                <label class="check"><input type="checkbox" name="gitClearGithubToken" />{{.T "git.clearToken"}}</label>
+              </div>
             </div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <div class="card hz-anchor" id="wizard-save">
-        <h3>{{.T "common.save"}}</h3>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "wizard.saveConfig"}}</button>
-          <a class="btn" href="/">{{.T "wizard.backToDashboard"}}</a>
-        </div>
-      </div>
+      {{template "savebar" (dict "Root" $ "Label" (.T "wizard.saveConfig") "Back" "/" "BackLabel" (.T "wizard.backToDashboard"))}}
     </form>
   </div>
 {{end}}

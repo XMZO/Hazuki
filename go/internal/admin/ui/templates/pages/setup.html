@@ -1,23 +1,25 @@
 {{define "setup"}}
   <div class="auth">
-    <div class="card">
-      <h2>{{.Title}}</h2>
-      <div class="muted small">{{.T "setup.subtitle"}} <code>HAZUKI_ADMIN_USERNAME</code> / <code>HAZUKI_ADMIN_PASSWORD</code>.</div>
-
-      <form method="post" action="/setup" class="form" style="margin-top:14px;">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <img src="/assets/avatar.png" alt="" width="56" height="56" />
+        <div>
+          <div class="auth-title">{{.Title}}</div>
+          <div class="auth-sub">{{.T "setup.subtitle"}} <code>HAZUKI_ADMIN_USERNAME</code> / <code>HAZUKI_ADMIN_PASSWORD</code>.</div>
+        </div>
+      </div>
+      <form method="post" action="/setup" class="stack">
         <div class="field">
-          <label>{{.T "auth.username"}}</label>
-          <input type="text" name="username" autocomplete="username" required />
+          <label class="label" for="setup-user">{{.T "auth.username"}}</label>
+          <input id="setup-user" type="text" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required autofocus />
         </div>
         <div class="field">
-          <label>{{.T "setup.password"}}</label>
-          <input type="password" name="password" autocomplete="new-password" required />
+          <label class="label" for="setup-pw">{{.T "setup.password"}}</label>
+          <input id="setup-pw" type="password" name="password" autocomplete="new-password" minlength="8" required />
         </div>
-        <div class="btn-row">
-          <button class="btn primary" type="submit">{{.T "setup.createAndLogin"}}</button>
-          <a class="btn" href="/login">{{.T "setup.backToLogin"}}</a>
-        </div>
+        <button class="btn primary" type="submit">{{.T "setup.createAndLogin"}}</button>
       </form>
+      <div class="auth-alt"><a href="/login">{{.T "setup.backToLogin"}}</a></div>
     </div>
   </div>
 {{end}}
